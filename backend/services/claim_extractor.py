@@ -41,6 +41,11 @@ _BARE_CITATION_FRAGMENT = re.compile(
     r"^[A-Z][a-zA-Z\-]+,?(?:\s+[A-Z]\.){1,3}\s*\(\d{4}\)\.?$"
 )
 
+_CONVERSATIONAL_FILLER = re.compile(
+    r"^(sure!?|certainly!?|here is|here are|as an ai|i hope this helps|let me know if|in summary|overall|in conclusion|to summarize)\b",
+    re.IGNORECASE,
+)
+
 try:
     import spacy  # type: ignore
 
@@ -59,6 +64,8 @@ class ExtractedClaim:
     type: ClaimType
     contains_citation: bool = False
     citation_text: str = ""
+    start_index: int = 0
+    end_index: int = 0
 
 
 def _split_sentences(text: str) -> List[str]:
@@ -81,7 +88,10 @@ def _split_sentences(text: str) -> List[str]:
     protected = text
     for abbr in _ABBREVIATIONS:
         protected = re.sub(
-            rf"\b{re.escape(abbr)}\.", abbr.replace(".", "") + "\uE000", protected, flags=re.IGNORECASE
+            rf"\b({re.escape(abbr)})\.",
+            lambda m: m.group(1).replace(".", "\uE000") + "\uE000",
+            protected,
+            flags=re.IGNORECASE,
         )
     protected = re.sub(r"(\d)\.(\d)", r"\1" + "\uE001" + r"\2", protected)
 
@@ -110,9 +120,10 @@ def _classify(sentence: str) -> ClaimType:
 
 
 def extract_claims(text: str, max_claims: int = 40) -> List[ExtractedClaim]:
-    """Extract atomic, classified claims from a block of text."""
+    """Extract atomic, classified claims from a block of text with character boundary mapping."""
     sentences = _split_sentences(text)
     claims: List[ExtractedClaim] = []
+    search_pos = 0
 
     for sentence in sentences:
         clean = sentence.strip()
@@ -123,6 +134,18 @@ def extract_claims(text: str, max_claims: int = 40) -> List[ExtractedClaim]:
             # Just an "Author, A. (Year)." fragment -- the citation itself is
             # already captured separately by extract_citation_strings().
             continue
+        if _CONVERSATIONAL_FILLER.match(clean) and len(clean.split()) < 10:
+            # Conversational preamble without standalone factual assertions
+            continue
+
+        # Map exact character index in original text for the Semantic Highlighting Engine
+        idx = text.find(clean, search_pos)
+        if idx == -1:
+            idx = text.find(clean)
+        start_idx = idx if idx != -1 else 0
+        end_idx = start_idx + len(clean)
+        if idx != -1:
+            search_pos = end_idx
 
         claim_type = _classify(clean)
         citation_match = _CITATION_PATTERN.search(clean)
@@ -134,6 +157,8 @@ def extract_claims(text: str, max_claims: int = 40) -> List[ExtractedClaim]:
                 type=claim_type,
                 contains_citation=bool(citation_match),
                 citation_text=citation_match.group(1) if citation_match else "",
+                start_index=start_idx,
+                end_index=end_idx,
             )
         )
         if len(claims) >= max_claims:

@@ -11,6 +11,7 @@ Retrieves ground-truth evidence across multiple independent sources:
 
 import asyncio
 import re
+import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import List, Optional
@@ -91,7 +92,7 @@ async def fetch_pubmed_evidence(query: str, max_results: int = 2) -> List[Retrie
 
     try:
         async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
-            url = "https://api.europepmc.org/search"
+            url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
             params = {
                 "query": clean_query,
                 "format": "json",
@@ -159,9 +160,9 @@ async def fetch_arxiv_evidence(query: str, max_results: int = 2) -> List[Retriev
                     summary_elem = entry.find("atom:summary", ns)
                     id_elem = entry.find("atom:id", ns)
 
-                    title = title_elem.text.strip().replace("\n", " ") if title_elem is not None else ""
-                    summary = summary_elem.text.strip().replace("\n", " ") if summary_elem is not None else ""
-                    link = id_elem.text.strip() if id_elem is not None else "https://arxiv.org"
+                    title = title_elem.text.strip().replace("\n", " ") if (title_elem is not None and title_elem.text) else ""
+                    summary = summary_elem.text.strip().replace("\n", " ") if (summary_elem is not None and summary_elem.text) else ""
+                    link = id_elem.text.strip() if (id_elem is not None and id_elem.text) else "https://arxiv.org"
 
                     if title and title != "Error":
                         results.append(
@@ -283,7 +284,8 @@ async def fetch_wikipedia_evidence(query: str, max_results: int = 2) -> List[Ret
                     snippet_html = item.get("snippet", "")
                     snippet_text = re.sub(r"<[^>]+>", "", snippet_html)
 
-                    summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{httpx.URL(title).raw_path.decode('utf-8', 'ignore')}"
+                    encoded_title = urllib.parse.quote(str(title).replace(' ', '_'), safe='')
+                    summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded_title}"
                     try:
                         summary_resp = await client.get(summary_url)
                         if summary_resp.status_code == 200:

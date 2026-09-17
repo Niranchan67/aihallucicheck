@@ -73,6 +73,8 @@ class ClaimResult(BaseModel):
     source_url: Optional[str] = None
     sources: Optional[List[SourceCitation]] = []
     reasoning: Optional[str] = None
+    start_index: Optional[int] = None
+    end_index: Optional[int] = None
 
 
 class CitationResult(BaseModel):

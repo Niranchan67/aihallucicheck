@@ -22,18 +22,24 @@ def _load_dotenv(path: str = ".env") -> None:
     If python-dotenv IS installed, we prefer it (it handles quoting/escaping
     better). Otherwise we fall back to a tiny hand-rolled parser.
     """
+    target_path = path
+    if not os.path.exists(target_path):
+        candidate = os.path.join(os.path.dirname(__file__), ".env")
+        if os.path.exists(candidate):
+            target_path = candidate
+
     try:
         from dotenv import load_dotenv  # type: ignore
 
-        load_dotenv(path)
+        load_dotenv(target_path)
         return
     except ImportError:
         pass
 
-    if not os.path.exists(path):
+    if not os.path.exists(target_path):
         return
 
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(target_path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:

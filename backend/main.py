@@ -113,7 +113,10 @@ async def verify_content(
     # 2. Stage 2 & 3: Independent Querying & Multi-Source Cross-Checking
     claim_results = []
     if payload.verify_claims and extracted_claims:
-        batch_input = [(c.id, c.text, c.type) for c in extracted_claims]
+        batch_input = [
+            (c.id, c.text, c.type, c.start_index, c.end_index)
+            for c in extracted_claims
+        ]
         claim_results = await verify_claims_pipeline(batch_input)
 
     # 3. Stage 4: Citation & Reference Validation
@@ -173,7 +176,7 @@ async def verify_content(
             claim_row = ClaimORM(
                 report_id=report_orm.id,
                 claim_text=c.text,
-                status=c.status.value,
+                status=getattr(c.status, "value", str(c.status)),
                 confidence=c.confidence,
                 evidence=c.evidence,
             )
@@ -183,7 +186,7 @@ async def verify_content(
             cite_row = CitationORM(
                 report_id=report_orm.id,
                 citation_text=cite.raw_text,
-                status=cite.status.value,
+                status=getattr(cite.status, "value", str(cite.status)),
                 url=cite.url,
             )
             db.add(cite_row)

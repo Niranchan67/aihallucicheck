@@ -17,7 +17,7 @@ import httpx
 
 from config import get_settings
 from schemas import ClaimResult, ClaimStatus, ClaimType, SourceCitation
-from services.independent_verifier import generate_independent_query
+from services.independent_verifier import _STOP_WORDS, generate_independent_query
 from services.multi_source_retriever import (
     RetrievedEvidence,
     retrieve_multi_source_evidence,
@@ -26,8 +26,7 @@ from services.multi_source_retriever import (
 settings = get_settings()
 
 OPENROUTER_KEYS = [
-    os.getenv("OPENROUTER_API_KEY", ""),
-    os.getenv("GEMINI_API_KEY", ""),
+    key for key in [os.getenv("OPENROUTER_API_KEY", "")] if key and len(key) > 10
 ]
 
 LLM_MODELS = [
@@ -137,8 +136,8 @@ async def _judge_with_llm(
                     continue
 
         # Provider B: Google Gemini API (if GEMINI_API_KEY is configured directly)
-        gemini_key = os.getenv("GEMINI_API_KEY")
-        if gemini_key and gemini_key.startswith("AIzaSy"):
+        gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if gemini_key and len(gemini_key) > 15:
             try:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
                 g_payload = {
@@ -174,7 +173,7 @@ def _semantic_evidence_cross_check(
 ) -> Tuple[ClaimStatus, float, str, str, str, str]:
     """
     Resilient fallback algorithm:
-    Cross-checks extracted claim against real retrieved Wikipedia & DuckDuckGo snippets.
+    Cross-checks extracted claim against real retrieved Wikipedia & scholarly snippets.
     """
     if not evidence_pool:
         return (
@@ -190,14 +189,21 @@ def _semantic_evidence_cross_check(
     all_snippets_lower = all_snippets.lower()
     claim_lower = claim_text.lower()
 
-    # Extract dates/years
-    claim_years = set(re.findall(r"\b(1[789]\d{2}|20\d{2})\b", claim_text))
-    evidence_years = set(re.findall(r"\b(1[789]\d{2}|20\d{2})\b", all_snippets))
+    # Extract dates/years across all historical periods (e.g. 1000-2099)
+    claim_years = set(re.findall(r"\b(1[0-9]{3}|20[0-9]{2})\b", claim_text))
+    evidence_years = set(re.findall(r"\b(1[0-9]{3}|20[0-9]{2})\b", all_snippets))
+
+    # Extract meaningful keywords from the claim
+    words = [
+        w for w in re.findall(r"\b[a-zA-Z0-9]{3,}\b", claim_lower)
+        if w not in _STOP_WORDS
+    ]
+    claim_words_set = set(words)
 
     # Sort evidence items by keyword overlap with slight domain boost
     def _score_ev(e):
         e_words = set(re.findall(r"\b[a-zA-Z0-9]{3,}\b", e.snippet.lower()))
-        score = len(set(words) & e_words)
+        score = len(claim_words_set & e_words)
         src_low = e.source_name.lower()
         if any(term in src_low for term in ["nature", "pubmed", "arxiv", "openalex", "science", "ieee"]):
             score += 1.5
@@ -213,15 +219,24 @@ def _semantic_evidence_cross_check(
         return (
             ClaimStatus.HALLUCINATED,
             20.0,
-            f"Chronological discrepancy: claim states {', '.join(claim_years)} while verified records state {', '.join(list(evidence_years)[:2])}.",
+            f"Chronological discrepancy: claim states {', '.join(sorted(claim_years))} while verified records state {', '.join(sorted(list(evidence_years))[:2])}.",
             best_source.snippet[:250],
             best_source.source_name,
             best_source.source_url,
         )
 
-    # Obvious refutation markers in ground truth
-    refutation_markers = ["fictional", "conspiracy", "debunked", "myth", "disproven", "fabricated", "hoax", "false claim"]
-    if any(rm in all_snippets_lower for rm in refutation_markers):
+    # Obvious refutation markers in primary ground truth
+    refutation_patterns = [
+        r"\bdebunked\b",
+        r"\bdisproven\b",
+        r"\bdisproved\b",
+        r"\bhoax\b",
+        r"\bfabricated claim\b",
+        r"\bfalse rumor\b",
+        r"\bconspiracy theory\b",
+    ]
+    best_snippet_lower = best_source.snippet.lower()
+    if any(re.search(pat, best_snippet_lower) for pat in refutation_patterns):
         return (
             ClaimStatus.HALLUCINATED,
             15.0,
@@ -231,8 +246,18 @@ def _semantic_evidence_cross_check(
             best_source.source_url,
         )
 
-    # Word overlap scoring
-    if overlap_ratio >= 0.50:
+    # Word overlap scoring against best source and overall evidence
+    best_source_words = set(re.findall(r"\b[a-zA-Z0-9]{3,}\b", best_source.snippet.lower()))
+    all_evidence_words = set(re.findall(r"\b[a-zA-Z0-9]{3,}\b", all_snippets_lower))
+
+    if claim_words_set:
+        best_overlap = len(claim_words_set & best_source_words) / len(claim_words_set)
+        total_overlap = len(claim_words_set & all_evidence_words) / len(claim_words_set)
+        overlap_ratio = max(best_overlap, total_overlap * 0.9)
+    else:
+        overlap_ratio = 0.0
+
+    if overlap_ratio >= 0.55:
         conf = min(98.0, round(78.0 + (overlap_ratio * 20.0), 1))
         return (
             ClaimStatus.VERIFIED,
@@ -262,7 +287,13 @@ def _semantic_evidence_cross_check(
         )
 
 
-async def verify_single_claim(claim_id: str, claim_text: str, claim_type: ClaimType) -> ClaimResult:
+async def verify_single_claim(
+    claim_id: str,
+    claim_text: str,
+    claim_type: ClaimType,
+    start_index: int = 0,
+    end_index: int = 0,
+) -> ClaimResult:
     """Run full verification pipeline for a single claim across multiple sources."""
     if claim_type == ClaimType.OPINION:
         return ClaimResult(
@@ -276,6 +307,8 @@ async def verify_single_claim(claim_id: str, claim_text: str, claim_type: ClaimT
             source_url=None,
             sources=[],
             reasoning="Sentence expresses personal opinion, sentiment, or speculation rather than an objective verifiable fact.",
+            start_index=start_index,
+            end_index=end_index,
         )
 
     # Stage 2: Independent verification query generation
@@ -316,10 +349,19 @@ async def verify_single_claim(claim_id: str, claim_text: str, claim_type: ClaimT
         source_url=src_url,
         sources=sources_list,
         reasoning=reasoning,
+        start_index=start_index,
+        end_index=end_index,
     )
 
 
-async def verify_claims_pipeline(claims: List[Tuple[str, str, ClaimType]]) -> List[ClaimResult]:
+async def verify_claims_pipeline(claims: List[Tuple]) -> List[ClaimResult]:
     """Verify a batch of claims concurrently across the pipeline."""
-    tasks = [verify_single_claim(cid, ctext, ctype) for cid, ctext, ctype in claims]
+    tasks = []
+    for item in claims:
+        if len(item) >= 5:
+            cid, ctext, ctype, s_idx, e_idx = item[:5]
+        else:
+            cid, ctext, ctype = item[:3]
+            s_idx, e_idx = 0, len(ctext)
+        tasks.append(verify_single_claim(cid, ctext, ctype, s_idx, e_idx))
     return await asyncio.gather(*tasks)
