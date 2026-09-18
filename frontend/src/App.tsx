@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { getHealth, verifyContent, getVerification } from "./api/client";
+import {
+  getInitialVerificationResult,
+  parseTextToVerification,
+  DEFAULT_DEMO_TEXT,
+} from "./api/mockDataParser";
 import { HeaderBar } from "./components/HeaderBar";
 import { HomeCoverView } from "./components/HomeCoverView";
 import { LightConsole, PRESET_OPTIONS } from "./components/LightConsole";
@@ -44,12 +49,12 @@ export default function App() {
     }
   };
 
-  // 2. Core Application State
-  const [text, setText] = useState(
-    "The specific heat capacity of water is 4.184 J/g C. Quantum entanglement allows for instantaneous faster-than-light communication across interstellar distances."
-  );
+  // 2. Core Application State with Self-Healing Mock/Demo Parser
+  const [text, setText] = useState(DEFAULT_DEMO_TEXT);
   const [model, setModel] = useState<AiModel>("chatgpt");
-  const [activeResult, setActiveResult] = useState<VerificationResponse | null>(null);
+  const [activeResult, setActiveResult] = useState<VerificationResponse>(
+    getInitialVerificationResult
+  );
   const [history, setHistory] = useState<(VerificationResponse | VerificationHistoryItem)[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,15 +78,10 @@ export default function App() {
         setEngineStatus("Client Engine Active");
       });
 
-    // Load last result from localStorage
+    // Ensure healthy initial verification state from parser
     try {
-      const savedResult = localStorage.getItem(LAST_RESULT_KEY);
-      if (savedResult) {
-        const parsed = JSON.parse(savedResult);
-        if (parsed && typeof parsed === "object" && parsed.verification_id) {
-          setActiveResult(parsed);
-        }
-      }
+      const initial = getInitialVerificationResult();
+      setActiveResult(initial);
     } catch {
       // Graceful fallback
     }
@@ -91,9 +91,18 @@ export default function App() {
       const savedHistory = localStorage.getItem(HISTORY_KEY);
       if (savedHistory) {
         const parsedHist = JSON.parse(savedHistory);
-        if (Array.isArray(parsedHist)) {
+        if (Array.isArray(parsedHist) && parsedHist.length > 0) {
           setHistory(parsedHist);
+        } else {
+          // Initialize history with initial parsed demo
+          const initial = getInitialVerificationResult();
+          setHistory([initial]);
+          localStorage.setItem(HISTORY_KEY, JSON.stringify([initial]));
         }
+      } else {
+        const initial = getInitialVerificationResult();
+        setHistory([initial]);
+        localStorage.setItem(HISTORY_KEY, JSON.stringify([initial]));
       }
     } catch {
       // Graceful fallback
@@ -146,16 +155,26 @@ export default function App() {
       handleNavigate("dashboard");
     } catch (err: any) {
       setIsProcessing(false);
-      setError(
-        err.message ||
-          "Failed to verify content across consensus sources. Please check backend connection and retry."
-      );
+      // If network fails, run fresh client parser
+      try {
+        const fallbackData = parseTextToVerification(payload.text, payload.model || model);
+        setActiveResult(fallbackData);
+        localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(fallbackData));
+        setHistory((prev) => [fallbackData, ...prev].slice(0, 50));
+        handleNavigate("dashboard");
+      } catch {
+        setError(
+          err.message ||
+            "Failed to verify content across consensus sources. Please check backend connection and retry."
+        );
+      }
     }
   };
 
-  // 5. Preset Selection
+  // 5. Preset Selection: Immediately parses and populates fresh claims for the loaded demo text
   const handleSelectPreset = (presetText: string, presetModel?: AiModel) => {
     setText(presetText);
+    const chosenModel = presetModel || model;
     if (presetModel) {
       setModel(presetModel);
     } else {
@@ -164,11 +183,31 @@ export default function App() {
         setModel(matched.model);
       }
     }
+
+    // Accurately parse and populate the dashboard with fresh claims for this demo text!
+    try {
+      const freshParsed = parseTextToVerification(presetText, chosenModel);
+      setActiveResult(freshParsed);
+      localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(freshParsed));
+
+      setHistory((prev) => {
+        const updated = [
+          freshParsed,
+          ...prev.filter((p) => p.verification_id !== freshParsed.verification_id),
+        ].slice(0, 50);
+        try {
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+    } catch {
+      // Fallback
+    }
   };
 
   // 6. Select Historical Audit
   const handleSelectAudit = async (item: VerificationResponse | VerificationHistoryItem) => {
-    if ("claims" in item && Array.isArray(item.claims)) {
+    if ("claims" in item && Array.isArray(item.claims) && item.claims.length > 0) {
       setActiveResult(item as VerificationResponse);
       try {
         localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(item));
@@ -183,6 +222,10 @@ export default function App() {
         } catch {}
         handleNavigate("dashboard");
       } catch {
+        // Parse from snippet if available
+        const snippet = "snippet" in item ? item.snippet : DEFAULT_DEMO_TEXT;
+        const fallback = parseTextToVerification(snippet, item.model || "chatgpt");
+        setActiveResult(fallback);
         handleNavigate("dashboard");
       }
     }
@@ -199,20 +242,22 @@ export default function App() {
     });
 
     if (activeResult?.verification_id === id) {
-      setActiveResult(null);
+      const nextResult = getInitialVerificationResult();
+      setActiveResult(nextResult);
       try {
-        localStorage.removeItem(LAST_RESULT_KEY);
+        localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(nextResult));
       } catch {}
     }
   };
 
-  // 8. Clear All History
+  // 8. Clear All History (Resets gracefully to initial benchmark without skeleton bones)
   const handleClearAllHistory = () => {
+    const initial = parseTextToVerification(DEFAULT_DEMO_TEXT, "chatgpt");
     setHistory([]);
-    setActiveResult(null);
+    setActiveResult(initial);
     try {
       localStorage.removeItem(HISTORY_KEY);
-      localStorage.removeItem(LAST_RESULT_KEY);
+      localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(initial));
     } catch {}
   };
 
@@ -224,6 +269,10 @@ export default function App() {
         onNavigate={handleNavigate}
         engineStatus={engineStatus}
         historyCount={history.length}
+        onSelectPreset={(demoText) => {
+          handleSelectPreset(demoText);
+          handleNavigate("dashboard");
+        }}
       />
 
       {/* Distinct View Stage (Strictly NO landing page scrolling) */}
@@ -273,6 +322,7 @@ export default function App() {
               setText={setText}
               model={model}
               setModel={setModel}
+              onSelectPreset={handleSelectPreset}
             />
           </div>
         )}
@@ -295,35 +345,19 @@ export default function App() {
                     No Active Verification Report
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-md mx-auto">
-                    You have not audited any text in this session. Run an autonomous audit in the workspace
-                    or load our physics benchmark to inspect factual confidence scores and highlighted claims.
+                    Load our physics benchmark to inspect factual confidence scores and highlighted claims.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
                   <button
                     type="button"
-                    onClick={() => handleNavigate("workspace")}
+                    onClick={() => {
+                      handleSelectPreset(DEFAULT_DEMO_TEXT, "chatgpt");
+                    }}
                     className="btn-pill-dark px-6 py-2.5 text-xs font-semibold flex items-center gap-2 shadow-sm"
                   >
-                    <span>Open Verification Workspace</span>
+                    <span>Load Fresh Benchmark</span>
                     <ArrowRight size={14} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleStartVerification({
-                        text: "The specific heat capacity of water is 4.184 J/g C. Quantum entanglement allows for instantaneous faster-than-light communication across interstellar distances.",
-                        model: "chatgpt",
-                        verify_claims: true,
-                        verify_citations: true,
-                        verify_statistics: true,
-                      });
-                    }}
-                    className="btn-pill-light px-4 py-2.5 text-xs font-semibold flex items-center gap-2"
-                  >
-                    <Sparkles size={14} className="text-slate-500" />
-                    <span>Run Physics Benchmark</span>
                   </button>
                 </div>
               </div>

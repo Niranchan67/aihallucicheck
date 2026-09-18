@@ -22,6 +22,7 @@ interface LightConsoleProps {
   setText: (val: string) => void;
   model: AiModel;
   setModel: (m: AiModel) => void;
+  onSelectPreset?: (text: string, model: AiModel) => void;
 }
 
 export const PRESET_OPTIONS = [
@@ -67,6 +68,7 @@ export function LightConsole({
   setText,
   model,
   setModel,
+  onSelectPreset,
 }: LightConsoleProps) {
   const [aggressiveMode, setAggressiveMode] = useState(false);
   const [sourceDepth, setSourceDepth] = useState<"standard" | "deep">("standard");
@@ -152,6 +154,9 @@ export function LightConsole({
                     onClick={() => {
                       setText(p.text);
                       setModel(p.model);
+                      if (onSelectPreset) {
+                        onSelectPreset(p.text, p.model);
+                      }
                     }}
                     className="px-2.5 py-1 rounded-full bg-white text-slate-700 border border-slate-200 hover:border-slate-400 hover:text-slate-900 transition-colors cursor-pointer shrink-0 font-medium"
                   >

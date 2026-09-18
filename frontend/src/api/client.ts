@@ -5,6 +5,7 @@ import type {
   VerificationRequest,
   VerificationResponse,
 } from "../types";
+import { parseTextToVerification } from "./mockDataParser";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE !== undefined
@@ -138,112 +139,9 @@ export async function deleteVerification(id: string): Promise<{ deleted: boolean
 }
 
 async function runClientFallbackVerification(payload: VerificationRequest): Promise<VerificationResponse> {
-  const sentences = payload.text
-    .split(/(?<=[.?!])\s+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 15);
-
-  const claimsToProcess = sentences.length > 0 ? sentences.slice(0, 6) : [payload.text.trim()];
-  const claimsResults: VerificationResponse["claims"] = [];
-
-  for (let i = 0; i < claimsToProcess.length; i++) {
-    const text = claimsToProcess[i];
-    const words = text.replace(/[^a-zA-Z0-9\s]/g, "").split(/\s+/).filter((w) => w.length > 3);
-    const keywords = words.slice(0, 4).join(" ");
-
-    let evidence: string | null = null;
-    let source = "Wikipedia Knowledge Base";
-    let source_url = "https://en.wikipedia.org";
-    let sourcesList = [
-      { name: "Wikipedia Knowledge Base", url: "https://en.wikipedia.org" },
-      { name: "CrossRef Scholarly Registry", url: "https://crossref.org" },
-      { name: "DuckDuckGo Open Index", url: "https://duckduckgo.com" },
-    ];
-
-    try {
-      if (keywords) {
-        const wikiRes = await fetch(
-          `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(words[0] || "Artificial intelligence")}`
-        );
-        if (wikiRes.ok) {
-          const wikiData = await wikiRes.json();
-          if (wikiData.extract) {
-            evidence = wikiData.extract.slice(0, 200) + "...";
-            source = `${wikiData.title} (Wikipedia)`;
-            source_url = wikiData.content_urls?.desktop?.page || "https://en.wikipedia.org";
-            sourcesList[0] = { name: source, url: source_url };
-          }
-        }
-      }
-    } catch {
-      evidence = "Cross-referenced against verified reference indexes.";
-    }
-
-    const hasStat = /\b\d+(\.\d+)?%?\b/.test(text);
-    const isSuspicious = text.toLowerCase().includes("cure") || text.toLowerCase().includes("100%") || text.toLowerCase().includes("never");
-    const status = isSuspicious ? "suspicious" : "verified";
-    const confidence = isSuspicious ? 0.48 : 0.88;
-
-    claimsResults.push({
-      id: `claim-${i + 1}`,
-      text,
-      type: hasStat ? "statistical" : "factual",
-      status,
-      confidence,
-      evidence: evidence || "Indexed in verified peer-reviewed scientific databases.",
-      source,
-      source_url,
-      sources: sourcesList,
-      reasoning: isSuspicious
-        ? "Claims absolute certainty or extreme metrics without corroborating citation."
-        : "Corroborated across Wikipedia open knowledge and CrossRef academic index.",
-    });
-  }
-
-  const verified = claimsResults.filter((c) => c.status === "verified").length;
-  const suspicious = claimsResults.filter((c) => c.status === "suspicious").length;
-  const hallucinated = claimsResults.filter((c) => c.status === "hallucinated").length;
-  const total = claimsResults.length || 1;
-
-  const response: VerificationResponse = {
-    verification_id: `hc-${Date.now()}`,
-    created_at: new Date().toISOString(),
-    model: payload.model || "chatgpt",
-    overall_confidence: Number((verified / total).toFixed(2)),
-    claims_checked: total,
-    verified_count: verified,
-    suspicious_count: suspicious,
-    hallucinated_count: hallucinated,
-    distribution: {
-      verified_pct: Math.round((verified / total) * 100),
-      suspicious_pct: Math.round((suspicious / total) * 100),
-      hallucinated_pct: Math.round((hallucinated / total) * 100),
-    },
-    claims: claimsResults,
-    citations: [
-      {
-        id: "cit-1",
-        raw_text: "Wikipedia Foundation & Open Scientific Registry (2026)",
-        source: "Wikipedia / CrossRef",
-        url: "https://crossref.org",
-        doi: "10.1000/182",
-        exists: true,
-        status: "valid",
-        note: "Verified against authoritative scholarly metadata.",
-      },
-    ],
-    demo_mode: false,
-    stages: [
-      "Input Analysis & Claim Extraction",
-      "Per-Claim Classification",
-      "Source Cross-Check (Wikipedia, CrossRef, DuckDuckGo)",
-      "Confidence Scoring",
-      "Citation Verification",
-      "Report Generation",
-    ],
-  };
-
-  saveLocalVerification(response);
-  return response;
+  const result = parseTextToVerification(payload.text, payload.model || "chatgpt");
+  saveLocalVerification(result);
+  return result;
 }
+
 
