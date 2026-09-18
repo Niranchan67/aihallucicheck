@@ -227,7 +227,6 @@ export default function App() {
         {activeTab === "home" && (
           <HomeCoverView
             onNavigate={handleNavigate}
-            onStartVerification={handleStartVerification}
             hasActiveResult={!!activeResult}
             historyCount={history.length}
           />
