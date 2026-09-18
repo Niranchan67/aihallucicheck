@@ -1,143 +1,279 @@
 import React, { useEffect, useState } from "react";
-import { Shield, Sparkles, Terminal, Layers, ArrowDown } from "lucide-react";
-import { getHealth, verifyContent } from "./api/client";
-import { LandingHero } from "./components/LandingHero";
-import { LandingProblem } from "./components/LandingProblem";
-import { LandingArchitecture } from "./components/LandingArchitecture";
-import { LandingWorkstation } from "./components/LandingWorkstation";
-import { LandingEvidence } from "./components/LandingEvidence";
-import { LandingHistory } from "./components/LandingHistory";
-import { LandingTeam } from "./components/LandingTeam";
-import { LandingFooter } from "./components/LandingFooter";
-import type { VerificationRequest, VerificationResponse } from "./types";
+import { Shield, Menu, Terminal, BarChart3, Compass, History, Sparkles } from "lucide-react";
+import { getHealth, verifyContent, getVerification } from "./api/client";
+import { AppSidebar } from "./components/AppSidebar";
+import { WorkspaceHub } from "./components/WorkspaceHub";
+import { AnalysisConsole } from "./components/AnalysisConsole";
+import { ResultsDashboard } from "./components/ResultsDashboard";
+import { AuditHistory } from "./components/AuditHistory";
+import type {
+  WorkspaceView,
+  VerificationRequest,
+  VerificationResponse,
+  VerificationHistoryItem,
+} from "./types";
+
+const LAST_RESULT_KEY = "hallucicheck_last_result";
+const HISTORY_KEY = "hallucicheck_history";
 
 export default function App() {
-  const [result, setResult] = useState<VerificationResponse | null>(null);
+  const [currentView, setCurrentView] = useState<WorkspaceView>("hub");
+  const [activeResult, setActiveResult] = useState<VerificationResponse | null>(null);
+  const [history, setHistory] = useState<(VerificationResponse | VerificationHistoryItem)[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [engineStatus, setEngineStatus] = useState("Checking...");
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [consoleInitialText, setConsoleInitialText] = useState("");
 
+  // 1. Initial LocalStorage Bridge & System Health
   useEffect(() => {
+    // Engine health check
     getHealth()
       .then((res) => {
-        setEngineStatus(res.status === "online" ? "Live Multi-Source" : "Standby");
+        setEngineStatus(res.status === "online" ? "Live Multi-Source v2.4" : "Standby (Client Engine)");
       })
       .catch(() => {
-        setEngineStatus("Offline");
+        setEngineStatus("Client Engine Active");
       });
 
+    // Load last result from localStorage gracefully
     try {
-      const saved = localStorage.getItem("hallucicheck_last_result");
-      if (saved) {
-        setResult(JSON.parse(saved));
+      const savedResult = localStorage.getItem(LAST_RESULT_KEY);
+      if (savedResult) {
+        const parsed = JSON.parse(savedResult);
+        if (parsed && typeof parsed === "object" && parsed.verification_id) {
+          setActiveResult(parsed);
+        }
       }
     } catch {
-      // Ignore parse error
+      // Ignore corrupted json
     }
+
+    // Load history from localStorage gracefully
+    try {
+      const savedHistory = localStorage.getItem(HISTORY_KEY);
+      if (savedHistory) {
+        const parsedHist = JSON.parse(savedHistory);
+        if (Array.isArray(parsedHist)) {
+          setHistory(parsedHist);
+        }
+      }
+    } catch {
+      // Ignore corrupted json
+    }
+
+    // Sync URL Hash
+    const hash = window.location.hash.replace("#", "") as WorkspaceView;
+    if (["hub", "console", "results", "history"].includes(hash)) {
+      setCurrentView(hash);
+    } else {
+      setCurrentView("hub");
+      window.location.hash = "hub";
+    }
+
+    // Global keyboard shortcut: Cmd+N / Ctrl+N for new audit
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        handleNewAudit();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  const navigate = (view: WorkspaceView) => {
+    setCurrentView(view);
+    window.location.hash = view;
+  };
+
+  const handleNewAudit = () => {
+    setConsoleInitialText("");
+    navigate("console");
+  };
+
+  const handleNavigateToConsole = (initialText?: string) => {
+    if (initialText !== undefined) {
+      setConsoleInitialText(initialText);
+    }
+    navigate("console");
+  };
+
+  // 2. Verification Execution Workflow
   const handleStartVerification = async (payload: VerificationRequest) => {
     setIsProcessing(true);
     setError(null);
+    navigate("console");
 
     try {
       const data = await verifyContent(payload);
-      setResult(data);
-      localStorage.setItem("hallucicheck_last_result", JSON.stringify(data));
+      setActiveResult(data);
       setIsProcessing(false);
+
+      // Persist to localStorage data bridge
+      try {
+        localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(data));
+      } catch {}
+
+      // Update history list
+      setHistory((prev) => {
+        const updated = [data, ...prev.filter((p) => p.verification_id !== data.verification_id)].slice(
+          0,
+          50
+        );
+        try {
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+
+      // Automatically transition to Results Dashboard
+      navigate("results");
     } catch (err: any) {
       setIsProcessing(false);
       setError(
         err.message ||
-          "Failed to verify content. Check that the backend server is running and try again."
+          "Failed to verify content across consensus sources. Check backend connection and try again."
       );
     }
   };
 
+  // 3. Select historical verification
+  const handleSelectHistoryItem = async (item: VerificationResponse | VerificationHistoryItem) => {
+    if ("claims" in item && Array.isArray(item.claims)) {
+      setActiveResult(item as VerificationResponse);
+      try {
+        localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(item));
+      } catch {}
+      navigate("results");
+    } else {
+      // Fetch full details if only snippet exists
+      try {
+        const full = await getVerification(item.verification_id);
+        setActiveResult(full);
+        try {
+          localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(full));
+        } catch {}
+        navigate("results");
+      } catch {
+        navigate("results");
+      }
+    }
+  };
+
+  // 4. Delete & Clear History
+  const handleDeleteHistoryItem = (id: string) => {
+    setHistory((prev) => {
+      const updated = prev.filter((p) => p.verification_id !== id);
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    if (activeResult?.verification_id === id) {
+      setActiveResult(null);
+      localStorage.removeItem(LAST_RESULT_KEY);
+    }
+  };
+
+  const handleClearAllHistory = () => {
+    setHistory([]);
+    setActiveResult(null);
+    localStorage.removeItem(HISTORY_KEY);
+    localStorage.removeItem(LAST_RESULT_KEY);
+  };
+
   return (
-    <div className="min-h-screen bg-[#000000] text-zinc-100 selection:bg-indigo-500/30 selection:text-indigo-200 relative overflow-x-hidden">
-      {/* Ambient Atmospheric Cosmic Glow */}
+    <div className="min-h-screen bg-[#090d16] text-zinc-100 flex flex-col md:flex-row antialiased relative overflow-hidden font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
+      {/* Ambient Radial Mesh Gradient */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
-        <div className="ambient-glow-mesh top-[-100px] left-1/2 -translate-x-1/2" />
-        <div className="absolute bottom-[-100px] -right-20 w-[550px] h-[450px] rounded-full bg-purple-950/20 blur-[130px]" />
+        <div className="ambient-glow-mesh top-[-100px] left-1/3 -translate-x-1/2" />
+        <div className="absolute bottom-[-100px] -right-20 w-[550px] h-[450px] rounded-full bg-emerald-950/20 blur-[130px]" />
       </div>
 
-      {/* Sticky Top Header (Single-line at desktop, height 64px) */}
-      <header className="sticky top-0 z-40 w-full border-b border-zinc-800/80 bg-[#000000]/80 backdrop-blur-xl px-4 sm:px-6 h-16 flex items-center">
-        <div className="mx-auto w-full max-w-7xl flex items-center justify-between gap-4">
-          {/* Logo & Title */}
-          <a href="#hero" className="flex items-center gap-2.5 hover:opacity-90 transition-opacity">
-            <div className="p-1.5 rounded-md border border-zinc-700 bg-zinc-900 text-white shadow-sm">
-              <Shield size={18} className="text-indigo-400" />
-            </div>
-            <div>
-              <span className="text-sm font-bold text-white tracking-tight flex items-center gap-1.5">
-                HalluciCheck
-                <span className="text-[10px] font-mono font-semibold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.2 rounded border border-indigo-500/20">
-                  v2.0
-                </span>
-              </span>
-            </div>
-          </a>
-
-          {/* Nav Anchor Links */}
-          <nav className="hidden md:flex items-center gap-6 text-xs font-mono text-zinc-400">
-            <a href="#problem" className="hover:text-white transition-colors">
-              Problem
-            </a>
-            <a href="#architecture" className="hover:text-white transition-colors">
-              Architecture
-            </a>
-            <a href="#workstation" className="hover:text-white transition-colors text-indigo-300">
-              Workstation
-            </a>
-            <a href="#evidence" className="hover:text-white transition-colors">
-              Evidence
-            </a>
-            <a href="#history" className="hover:text-white transition-colors">
-              History
-            </a>
-            <a href="#team" className="hover:text-white transition-colors">
-              Team
-            </a>
-          </nav>
-
-          {/* Right Header: Status + Quick CTA */}
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-mono text-emerald-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>{engineStatus}</span>
-            </div>
-
-            <a
-              href="#workstation"
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-white text-black font-semibold text-xs hover:bg-zinc-200 transition-all shadow-sm active:scale-[0.98]"
-            >
-              <span>Launch Verifier</span>
-              <ArrowDown size={13} />
-            </a>
+      {/* Mobile Top Navigation Header */}
+      <header className="md:hidden h-14 border-b border-white/10 bg-[#090d16]/90 backdrop-blur-md px-4 flex items-center justify-between z-30 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+            <Shield size={17} />
           </div>
+          <span className="font-bold text-sm text-white tracking-tight">HalluciCheck</span>
+          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-semibold border border-cyan-500/30">
+            v2.4
+          </span>
         </div>
+
+        <button
+          type="button"
+          onClick={() => setIsMobileSidebarOpen(true)}
+          className="p-1.5 rounded-lg border border-white/10 bg-white/5 text-zinc-300 hover:text-white cursor-pointer"
+        >
+          <Menu size={18} />
+        </button>
       </header>
 
-      {/* Main Flowing Section-Wise Landing Page */}
-      <main className="w-full">
-        <LandingHero engineStatus={engineStatus} />
-        <LandingProblem />
-        <LandingArchitecture />
-        <LandingWorkstation
-          onStartVerification={handleStartVerification}
-          isProcessing={isProcessing}
-          result={result}
-          error={error}
-        />
-        <LandingEvidence result={result} />
-        <LandingHistory onLoadReport={(rep) => setResult(rep)} />
-        <LandingTeam />
-      </main>
+      {/* Sleek Left Sidebar (ChatGPT / Claude Web App UI) */}
+      <AppSidebar
+        currentView={currentView}
+        onNavigate={navigate}
+        onNewAudit={handleNewAudit}
+        activeResult={activeResult}
+        history={history}
+        onSelectHistoryItem={handleSelectHistoryItem}
+        engineStatus={engineStatus}
+        isOpenMobile={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
+      />
 
-      {/* Modern Minimalist Footer */}
-      <LandingFooter />
+      {/* Main Workspace Stage Panel */}
+      <main className="flex-1 flex flex-col min-w-0 h-[calc(100vh-56px)] md:h-screen overflow-y-auto">
+        {currentView === "hub" && (
+          <WorkspaceHub
+            onStartVerification={handleStartVerification}
+            onNavigateToConsole={handleNavigateToConsole}
+            onSelectHistoryItem={handleSelectHistoryItem}
+            history={history}
+            engineStatus={engineStatus}
+          />
+        )}
+
+        {currentView === "console" && (
+          <AnalysisConsole
+            onStartVerification={handleStartVerification}
+            isProcessing={isProcessing}
+            error={error}
+            initialText={consoleInitialText}
+          />
+        )}
+
+        {currentView === "results" && (
+          <ResultsDashboard
+            result={activeResult}
+            onVerifyAgain={() => navigate("console")}
+            onSelectPreset={(sample) =>
+              handleStartVerification({
+                text: sample,
+                model: "chatgpt",
+                verify_claims: true,
+                verify_citations: true,
+                verify_statistics: true,
+              })
+            }
+          />
+        )}
+
+        {currentView === "history" && (
+          <AuditHistory
+            history={history}
+            onSelectAudit={handleSelectHistoryItem}
+            onDeleteAudit={handleDeleteHistoryItem}
+            onClearAllHistory={handleClearAllHistory}
+            onNavigateToConsole={handleNewAudit}
+          />
+        )}
+      </main>
     </div>
   );
 }

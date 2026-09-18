@@ -3,17 +3,27 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --bg-main: #090d16;
+    --bg-surface: #0e1526;
+    --bg-surface-elevated: #131c33;
+    --border-glass: rgba(255, 255, 255, 0.08);
+    --border-glass-cyan: rgba(6, 182, 212, 0.25);
+    --cyan-glow: rgba(6, 182, 212, 0.15);
+    --emerald-glow: rgba(16, 185, 129, 0.15);
+  }
+
   html {
     scroll-behavior: smooth;
-    background-color: #000000;
-    color: #f4f4f5;
+    background-color: #090d16;
+    color: #f1f5f9;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
 
   body {
     min-height: 100vh;
-    background-color: #000000;
-    color: #f4f4f5;
+    background-color: #090d16;
+    color: #f1f5f9;
     overflow-x: hidden;
   }
 
@@ -23,113 +33,103 @@
     height: 6px;
   }
   ::-webkit-scrollbar-track {
-    background: #000000;
+    background: #090d16;
   }
   ::-webkit-scrollbar-thumb {
-    background: #27272a;
+    background: #1e293b;
     border-radius: 4px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3f3f46;
+    background: #334155;
   }
 }
 
-/* WriteMate AI Ambient Atmospheric Glow */
+/* Ambient Obsidian Glow Mesh */
 .ambient-glow-mesh {
   position: absolute;
-  width: 750px;
-  height: 480px;
+  width: 800px;
+  height: 520px;
   border-radius: 9999px;
   background: radial-gradient(
     ellipse at center,
-    rgba(59, 130, 246, 0.22) 0%,
-    rgba(99, 102, 241, 0.2) 35%,
-    rgba(168, 85, 247, 0.18) 55%,
-    rgba(0, 0, 0, 0) 75%
+    rgba(6, 182, 212, 0.14) 0%,
+    rgba(16, 185, 129, 0.10) 35%,
+    rgba(99, 102, 241, 0.08) 60%,
+    rgba(9, 13, 22, 0) 80%
   );
-  filter: blur(100px);
+  filter: blur(120px);
   pointer-events: none;
-  animation: ambientFloat 10s ease-in-out infinite alternate;
+  animation: ambientFloat 12s ease-in-out infinite alternate;
 }
 
 @keyframes ambientFloat {
   0% {
     transform: translate(0px, 0px) scale(1);
-    opacity: 0.65;
+    opacity: 0.7;
   }
   50% {
-    transform: translate(15px, -12px) scale(1.06);
-    opacity: 0.85;
+    transform: translate(20px, -15px) scale(1.05);
+    opacity: 0.9;
   }
   100% {
-    transform: translate(-10px, 8px) scale(0.96);
-    opacity: 0.7;
+    transform: translate(-15px, 10px) scale(0.95);
+    opacity: 0.75;
   }
 }
 
-/* Glass Card - WriteMate Theme */
-.glass-panel,
-.glass-card {
-  background: rgba(12, 13, 18, 0.85);
+/* Glassmorphic Cards & Panels */
+.glass-panel {
+  background: rgba(14, 21, 38, 0.75);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.6);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.glass-panel:hover,
-.glass-card:hover {
-  border-color: rgba(255, 255, 255, 0.16);
+.glass-panel:hover {
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
-/* Card with subtle glowing purple/blue accent (like Plus card in reference) */
-.glass-panel-cyan,
-.glass-card-glow {
-  background: rgba(12, 13, 18, 0.9);
+.glass-panel-cyan {
+  background: rgba(14, 21, 38, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(139, 92, 246, 0.35);
-  box-shadow: 0 0 35px -5px rgba(139, 92, 246, 0.15), 0 10px 30px -10px rgba(0, 0, 0, 0.8);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  box-shadow: 0 0 35px -5px rgba(6, 182, 212, 0.12), 0 12px 32px -8px rgba(0, 0, 0, 0.7);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.glass-panel-cyan:hover,
-.glass-card-glow:hover {
-  border-color: rgba(168, 85, 247, 0.55);
-  box-shadow: 0 0 45px -5px rgba(139, 92, 246, 0.25), 0 10px 30px -10px rgba(0, 0, 0, 0.8);
+.glass-panel-cyan:hover {
+  border-color: rgba(6, 182, 212, 0.5);
+  box-shadow: 0 0 45px -5px rgba(6, 182, 212, 0.2), 0 14px 36px -8px rgba(0, 0, 0, 0.8);
 }
 
-/* Rectangular Buttons (WriteMate Aesthetic) */
-.btn-white,
+/* Primary Action Button (Neon Cyan-Emerald Gradient) */
 .btn-cyan-gradient {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background-color: #ffffff;
-  color: #000000;
+  background: linear-gradient(135deg, #06b6d4 0%, #0ea5e9 40%, #10b981 100%);
+  color: #030712;
   font-weight: 600;
-  border-radius: 6px;
-  border: 1px solid #ffffff;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 14px rgba(6, 182, 212, 0.35);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 2px 10px rgba(255, 255, 255, 0.1);
   cursor: pointer;
 }
 
-.btn-white:hover,
 .btn-cyan-gradient:hover {
-  background-color: #e4e4e7;
-  border-color: #e4e4e7;
+  background: linear-gradient(135deg, #22d3ee 0%, #38bdf8 40%, #34d399 100%);
+  box-shadow: 0 4px 20px rgba(6, 182, 212, 0.5);
   transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(255, 255, 255, 0.2);
 }
 
-.btn-white:active,
 .btn-cyan-gradient:active {
   transform: scale(0.98);
 }
 
-.btn-white:disabled,
 .btn-cyan-gradient:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -137,34 +137,67 @@
   box-shadow: none;
 }
 
-/* Secondary outline button */
-.btn-outline {
+/* Secondary Button */
+.btn-glass {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.03);
-  color: #f4f4f5;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f1f5f9;
   font-weight: 500;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   cursor: pointer;
 }
 
-.btn-outline:hover {
+.btn-glass:hover {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
   transform: translateY(-1px);
 }
 
-.btn-outline:active {
+.btn-glass:active {
   transform: scale(0.98);
 }
 
-.btn-outline:disabled {
+.btn-glass:disabled {
   opacity: 0.4;
   cursor: not-allowed;
   transform: none;
+}
+
+/* Pulse animation for live indicators */
+@keyframes neonPulse {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.7));
+  }
+  50% {
+    opacity: 0.6;
+    filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.3));
+  }
+}
+
+.neon-pulse-emerald {
+  animation: neonPulse 2s infinite ease-in-out;
+}
+
+@keyframes neonPulseCyan {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(6, 182, 212, 0.7));
+  }
+  50% {
+    opacity: 0.6;
+    filter: drop-shadow(0 0 2px rgba(6, 182, 212, 0.3));
+  }
+}
+
+.neon-pulse-cyan {
+  animation: neonPulseCyan 2s infinite ease-in-out;
 }
 
 @media print {
@@ -176,7 +209,6 @@
     display: none !important;
   }
   .glass-panel,
-  .glass-card,
   .glass-panel-cyan {
     border: 1px solid #ccc !important;
     box-shadow: none !important;
