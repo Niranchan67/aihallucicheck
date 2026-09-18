@@ -262,6 +262,7 @@ def evaluate_single_proposition(
     source_name: str,
     source_url: str,
     claim_text: str,
+    subject_entity: str = "",
 ) -> Tuple[PropositionStatus, str]:
     """
     Evaluate a single atomic proposition against an evidence passage.
@@ -269,6 +270,15 @@ def evaluate_single_proposition(
     """
     ev_lower = evidence_snippet.lower()
     claim_lower = claim_text.lower()
+
+    # If evaluating a qualifier, verify the passage actually references the subject/entity
+    if prop.prop_type != "primary" and subject_entity:
+        subj_words = [w.lower() for w in re.findall(r"\b\w+\b", subject_entity) if len(w) > 2]
+        if subj_words and not any(w in ev_lower for w in subj_words):
+            return (
+                PropositionStatus.NOT_SUPPORTED,
+                f"Passage in {source_name} does not reference the claim subject ({subject_entity}).",
+            )
 
     # 1. PRIMARY PROPOSITION EVALUATION
     if prop.prop_type == "primary":
@@ -326,42 +336,48 @@ def evaluate_single_proposition(
 
     # 2. REASON / CAUSE QUALIFIER EVALUATION
     elif prop.prop_type == "reason":
-        # e.g. "for his theory of general relativity" -> terms: theory, general, relativity
         clean_phrase = re.sub(r"^(?:for|because of|due to|in recognition of)\s+", "", prop.raw_phrase, flags=re.I).strip()
-        clean_terms = {t for t in prop.content_terms if t not in ("for", "due", "recognition", "reason")}
+        clean_terms = {
+            w for w in re.findall(r"\b\w+\b", clean_phrase.lower())
+            if w not in ("for", "due", "recognition", "reason", "his", "her", "their", "the", "a", "an", "of", "and")
+        }
 
-        # Check if the specific reason terms are present in the evidence
         if clean_terms:
-            matched_terms = [t for t in clean_terms if t in ev_lower]
-            ratio = len(matched_terms) / len(clean_terms)
+            # The reason MUST be stated in causal/attributive connection to the event/award/action
+            causal_pat1 = (
+                r"\b(?:award(?:ed)?|prize|medal|honor|won|conferred|given|fined|resigned|arrested|created|fired|sentenced|elected|recognized)\b"
+                r".*?\b(?:for|in recognition of|because of|due to|citation|citing|on account of|as a result of)\s+([^.;]+)"
+            )
+            causal_pat2 = (
+                r"\b(?:for|in recognition of|because of|due to|citing)\s+([^.;]+?)"
+                r"(?:,\s*|\s+)(?:he|she|they|it|\w+)?\s*(?:was|were)?\s*"
+                r"(?:award(?:ed)?|prize|medal|honor|won|conferred|given|fined|resigned|arrested|created|fired)\b"
+            )
 
-            if ratio >= 0.60:
-                return (
-                    PropositionStatus.SUPPORTED,
-                    f"Supported by {source_name}: Reason '{clean_phrase}' is explicitly corroborated."
-                )
+            m1 = re.search(causal_pat1, ev_lower)
+            m2 = re.search(causal_pat2, ev_lower)
+            actual_reason_snippet = (m1.group(1) if m1 else (m2.group(1) if m2 else None))
 
-            # If evidence explicitly explains the reason for the award/action, but it's completely DIFFERENT
-            # e.g. Evidence states "for his discovery of the law of the photoelectric effect" while claim asserts "for his theory of general relativity"
-            reason_markers = [
-                r"\bfor (?:his|her|their)?\s+([^,.]+)",
-                r"\bin recognition of\s+([^,.]+)",
-                r"\bespecially for\s+([^,.]+)",
-            ]
-            for r_pat in reason_markers:
-                m = re.search(r_pat, ev_lower)
-                if m:
-                    actual_reason = m.group(1).strip()
-                    # If actual reason in evidence does not contain claim's reason terms
-                    if not any(t in actual_reason for t in clean_terms):
-                        return (
-                            PropositionStatus.CONTRADICTED,
-                            f"Contradicted by {source_name}: Official records state the achievement was '{actual_reason[:100]}', not '{clean_phrase}'."
-                        )
+            if actual_reason_snippet:
+                actual_reason = actual_reason_snippet.strip()
+                actual_words = set(re.findall(r"\b\w+\b", actual_reason))
+                matched_terms = [t for t in clean_terms if t in actual_words]
+                ratio = len(matched_terms) / len(clean_terms) if clean_terms else 0
+
+                if ratio >= 0.50:
+                    return (
+                        PropositionStatus.SUPPORTED,
+                        f"Supported by {source_name}: Reason '{clean_phrase}' is verified by official attribution."
+                    )
+                elif len(actual_reason) > 10:
+                    return (
+                        PropositionStatus.CONTRADICTED,
+                        f"Contradicted by {source_name}: Official records state the achievement was '{actual_reason[:100]}', not '{clean_phrase}'."
+                    )
 
         return (
             PropositionStatus.NOT_SUPPORTED,
-            f"Not substantiated in {source_name}: Evidence does not establish that this was given '{prop.raw_phrase}'."
+            f"Not substantiated in {source_name}: Evidence does not establish '{prop.raw_phrase}' as the verified reason or attribution."
         )
 
     # 3. DATE / TIME QUALIFIER EVALUATION
@@ -375,14 +391,21 @@ def evaluate_single_proposition(
                     PropositionStatus.SUPPORTED,
                     f"Supported by {source_name}: Chronology {', '.join(sorted(years))} matches verified records."
                 )
-            elif ev_years and not (years & ev_years):
-                # If evidence describes the same event with different year
-                return (
-                    PropositionStatus.CONTRADICTED,
-                    f"Chronological discrepancy in {source_name}: Claim states {', '.join(sorted(years))}, but records document {', '.join(sorted(list(ev_years))[:2])}."
-                )
 
-        return PropositionStatus.NOT_SUPPORTED, f"Date {prop.raw_phrase} not verified in {source_name}."
+            # Check for explicit conflicting year for this award/event
+            award_year_match = re.search(
+                rf"\b(?:awarded|won|received|conferred|held)\s+(?:the\s+)?(?:nobel\s+)?.*?\b(1[6-9]\d{2}|20\d{2})\b",
+                ev_lower
+            )
+            if award_year_match:
+                conflicting_yr = award_year_match.group(1)
+                if conflicting_yr not in years and any(k in ev_lower for k in ["prize", "award", "won", "received"]):
+                    return (
+                        PropositionStatus.CONTRADICTED,
+                        f"Chronological discrepancy in {source_name}: Records associate the year {conflicting_yr} with this event, not {', '.join(sorted(years))}."
+                    )
+
+        return PropositionStatus.NOT_SUPPORTED, f"Date {prop.raw_phrase} not explicitly verified in {source_name}."
 
     # 4. CATEGORY QUALIFIER EVALUATION
     elif prop.prop_type == "category":
@@ -446,41 +469,60 @@ def evaluate_complete_claim_propositions(
     """
     subj, pred, obj, propositions = decompose_claim_into_propositions(claim_text)
 
-    # Evaluate each proposition against the best evidence available in the pool
+    # Evaluate each proposition against all evidence in the pool
     for prop in propositions:
-        best_status = PropositionStatus.NOT_SUPPORTED
-        best_quote = None
-        best_source_name = None
-        best_source_url = None
-        best_rationale = ""
+        supp_matches = []
+        contra_matches = []
+        unsub_matches = []
 
         for s_name, s_url, snippet in evidence_pool:
-            status, rationale = evaluate_single_proposition(prop, snippet, s_name, s_url, claim_text)
+            status, rationale = evaluate_single_proposition(
+                prop, snippet, s_name, s_url, claim_text, subject_entity=subj
+            )
+            if status == PropositionStatus.SUPPORTED:
+                supp_matches.append((s_name, s_url, snippet, rationale))
+            elif status == PropositionStatus.CONTRADICTED:
+                contra_matches.append((s_name, s_url, snippet, rationale))
+            else:
+                unsub_matches.append((s_name, s_url, snippet, rationale))
 
-            # Contradiction takes immediate precedence
-            if status == PropositionStatus.CONTRADICTED:
-                best_status = PropositionStatus.CONTRADICTED
-                best_quote = snippet[:280]
-                best_source_name = s_name
-                best_source_url = s_url
-                best_rationale = rationale
-                break  # Stop checking this proposition; contradiction established
+        # Synthesize status for this proposition across all sources
+        if supp_matches and not contra_matches:
+            s_name, s_url, snippet, rationale = supp_matches[0]
+            prop.status = PropositionStatus.SUPPORTED
+            prop.evidence_quote = snippet[:280]
+            prop.source_name = s_name
+            prop.source_url = s_url
+            prop.rationale = rationale
 
-            elif status == PropositionStatus.SUPPORTED:
-                best_status = PropositionStatus.SUPPORTED
-                best_quote = snippet[:280]
-                best_source_name = s_name
-                best_source_url = s_url
-                best_rationale = rationale
+        elif contra_matches and not supp_matches:
+            s_name, s_url, snippet, rationale = contra_matches[0]
+            prop.status = PropositionStatus.CONTRADICTED
+            prop.evidence_quote = snippet[:280]
+            prop.source_name = s_name
+            prop.source_url = s_url
+            prop.rationale = rationale
 
-            elif status == PropositionStatus.NOT_SUPPORTED and best_status == PropositionStatus.NOT_SUPPORTED:
-                best_rationale = rationale
+        elif supp_matches and contra_matches:
+            # Conflicting evidence between sources on this proposition -> mark NOT_SUPPORTED
+            s_name, s_url, snippet, rationale = supp_matches[0]
+            contra_name = contra_matches[0][0]
+            prop.status = PropositionStatus.NOT_SUPPORTED
+            prop.evidence_quote = snippet[:280]
+            prop.source_name = s_name
+            prop.source_url = s_url
+            prop.rationale = f"Conflicting evidence between {s_name} and {contra_name} regarding '{prop.raw_phrase}'."
 
-        prop.status = best_status
-        prop.evidence_quote = best_quote
-        prop.source_name = best_source_name
-        prop.source_url = best_source_url
-        prop.rationale = best_rationale
+        else:
+            prop.status = PropositionStatus.NOT_SUPPORTED
+            if unsub_matches:
+                s_name, s_url, snippet, rationale = unsub_matches[0]
+                prop.evidence_quote = snippet[:280]
+                prop.source_name = s_name
+                prop.source_url = s_url
+                prop.rationale = rationale
+            else:
+                prop.rationale = f"Proposition '{prop.raw_phrase}' was not found in available evidence."
 
     # Synthesize Complete Claim Decision
     has_contradiction = any(p.status == PropositionStatus.CONTRADICTED for p in propositions)
