@@ -1,13 +1,11 @@
-import React, { useEffect, useState } from "react";
-import { Shield, Menu, Terminal, BarChart3, Compass, History, Sparkles } from "lucide-react";
+import React, { useEffect, useState, useRef } from "react";
 import { getHealth, verifyContent, getVerification } from "./api/client";
-import { AppSidebar } from "./components/AppSidebar";
-import { WorkspaceHub } from "./components/WorkspaceHub";
-import { AnalysisConsole } from "./components/AnalysisConsole";
-import { ResultsDashboard } from "./components/ResultsDashboard";
-import { AuditHistory } from "./components/AuditHistory";
+import { HeaderBar } from "./components/HeaderBar";
+import { LightConsole, PRESET_OPTIONS } from "./components/LightConsole";
+import { LightResults } from "./components/LightResults";
+import { HistoryDrawer } from "./components/HistoryDrawer";
 import type {
-  WorkspaceView,
+  AiModel,
   VerificationRequest,
   VerificationResponse,
   VerificationHistoryItem,
@@ -17,27 +15,31 @@ const LAST_RESULT_KEY = "hallucicheck_last_result";
 const HISTORY_KEY = "hallucicheck_history";
 
 export default function App() {
-  const [currentView, setCurrentView] = useState<WorkspaceView>("hub");
+  const [text, setText] = useState(
+    "The specific heat capacity of water is 4.184 J/g C. Quantum entanglement allows for instantaneous faster-than-light communication across interstellar distances."
+  );
+  const [model, setModel] = useState<AiModel>("chatgpt");
   const [activeResult, setActiveResult] = useState<VerificationResponse | null>(null);
   const [history, setHistory] = useState<(VerificationResponse | VerificationHistoryItem)[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [engineStatus, setEngineStatus] = useState("Checking...");
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [consoleInitialText, setConsoleInitialText] = useState("");
+  const [engineStatus, setEngineStatus] = useState("Checking…");
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   // 1. Initial LocalStorage Bridge & System Health
   useEffect(() => {
-    // Engine health check
+    // Check Engine Health
     getHealth()
       .then((res) => {
-        setEngineStatus(res.status === "online" ? "Live Multi-Source v2.4" : "Standby (Client Engine)");
+        setEngineStatus(res.status === "online" ? "Live Multi-Source v2.0" : "Client Engine Active");
       })
       .catch(() => {
         setEngineStatus("Client Engine Active");
       });
 
-    // Load last result from localStorage gracefully
+    // Gracefully load last result from localStorage
     try {
       const savedResult = localStorage.getItem(LAST_RESULT_KEY);
       if (savedResult) {
@@ -47,10 +49,10 @@ export default function App() {
         }
       }
     } catch {
-      // Ignore corrupted json
+      // Ignore corrupted localStorage data
     }
 
-    // Load history from localStorage gracefully
+    // Gracefully load history from localStorage
     try {
       const savedHistory = localStorage.getItem(HISTORY_KEY);
       if (savedHistory) {
@@ -60,54 +62,28 @@ export default function App() {
         }
       }
     } catch {
-      // Ignore corrupted json
+      // Ignore corrupted localStorage data
     }
 
-    // Sync URL Hash
-    const hash = window.location.hash.replace("#", "") as WorkspaceView;
-    if (["hub", "console", "results", "history"].includes(hash)) {
-      setCurrentView(hash);
-    } else {
-      setCurrentView("hub");
-      window.location.hash = "hub";
-    }
-
-    // Global keyboard shortcuts: Cmd+N / Ctrl+N for new audit, Escape to close overlays
+    // Keyboard Shortcuts: Cmd+N / Ctrl+N to clear/start new, Esc to dismiss modals
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
-        handleNewAudit();
+        handleStartNew();
       }
       if (e.key === "Escape") {
-        setIsMobileSidebarOpen(false);
+        setIsHistoryOpen(false);
       }
     };
+
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const navigate = (view: WorkspaceView) => {
-    setCurrentView(view);
-    window.location.hash = view;
-  };
-
-  const handleNewAudit = () => {
-    setConsoleInitialText("");
-    navigate("console");
-  };
-
-  const handleNavigateToConsole = (initialText?: string) => {
-    if (initialText !== undefined) {
-      setConsoleInitialText(initialText);
-    }
-    navigate("console");
-  };
-
-  // 2. Verification Execution Workflow
+  // 2. Start Verification Pipeline
   const handleStartVerification = async (payload: VerificationRequest) => {
     setIsProcessing(true);
     setError(null);
-    navigate("console");
 
     try {
       const data = await verifyContent(payload);
@@ -119,7 +95,7 @@ export default function App() {
         localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(data));
       } catch {}
 
-      // Update history list
+      // Update history
       setHistory((prev) => {
         const updated = [data, ...prev.filter((p) => p.verification_id !== data.verification_id)].slice(
           0,
@@ -131,42 +107,56 @@ export default function App() {
         return updated;
       });
 
-      // Automatically transition to Results Dashboard
-      navigate("results");
+      // Smooth scroll to results
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
     } catch (err: any) {
       setIsProcessing(false);
       setError(
         err.message ||
-          "Failed to verify content across consensus sources. Check backend connection and try again."
+          "Failed to verify content across consensus sources. Please check backend connection and retry."
       );
     }
   };
 
-  // 3. Select historical verification
-  const handleSelectHistoryItem = async (item: VerificationResponse | VerificationHistoryItem) => {
+  // 3. Preset Quick Select
+  const handleSelectPreset = (presetText: string) => {
+    setText(presetText);
+    const matched = PRESET_OPTIONS.find((p) => p.text === presetText);
+    if (matched) {
+      setModel(matched.model);
+    }
+  };
+
+  // 4. Select Historical Audit
+  const handleSelectAudit = async (item: VerificationResponse | VerificationHistoryItem) => {
     if ("claims" in item && Array.isArray(item.claims)) {
       setActiveResult(item as VerificationResponse);
       try {
         localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(item));
       } catch {}
-      navigate("results");
+      setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
     } else {
-      // Fetch full details if only snippet exists
       try {
         const full = await getVerification(item.verification_id);
         setActiveResult(full);
         try {
           localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(full));
         } catch {}
-        navigate("results");
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 100);
       } catch {
-        navigate("results");
+        // Fallback
       }
     }
   };
 
-  // 4. Delete & Clear History
-  const handleDeleteHistoryItem = (id: string) => {
+  // 5. Delete and Clear History
+  const handleDeleteAudit = (id: string) => {
     setHistory((prev) => {
       const updated = prev.filter((p) => p.verification_id !== id);
       try {
@@ -188,95 +178,92 @@ export default function App() {
     localStorage.removeItem(LAST_RESULT_KEY);
   };
 
+  const handleStartNew = () => {
+    setText("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
-    <div className="min-h-screen bg-[#090d16] text-zinc-100 flex flex-col md:flex-row antialiased relative overflow-hidden font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
-      {/* Ambient Radial Mesh Gradient */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
-        <div className="ambient-glow-mesh top-[-100px] left-1/3 -translate-x-1/2" />
-        <div className="absolute bottom-[-100px] -right-20 w-[550px] h-[450px] rounded-full bg-emerald-950/20 blur-[130px]" />
-      </div>
-
-      {/* Mobile Top Navigation Header */}
-      <header className="md:hidden h-14 border-b border-white/10 bg-[#090d16]/90 backdrop-blur-md px-4 flex items-center justify-between z-30 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
-            <Shield size={17} />
-          </div>
-          <span className="font-bold text-sm text-white tracking-tight">HalluciCheck</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-semibold border border-cyan-500/30">
-            v2.4
-          </span>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setIsMobileSidebarOpen(true)}
-          className="p-1.5 rounded-lg border border-white/10 bg-white/5 text-zinc-300 hover:text-white cursor-pointer"
-        >
-          <Menu size={18} />
-        </button>
-      </header>
-
-      {/* Sleek Left Sidebar (ChatGPT / Claude Web App UI) */}
-      <AppSidebar
-        currentView={currentView}
-        onNavigate={navigate}
-        onNewAudit={handleNewAudit}
-        activeResult={activeResult}
-        history={history}
-        onSelectHistoryItem={handleSelectHistoryItem}
+    <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col antialiased relative font-sans light-dot-grid selection:bg-slate-900 selection:text-white">
+      {/* Top Header Bar */}
+      <HeaderBar
         engineStatus={engineStatus}
-        isOpenMobile={isMobileSidebarOpen}
-        onCloseMobile={() => setIsMobileSidebarOpen(false)}
+        onOpenHistory={() => setIsHistoryOpen(true)}
+        historyCount={history.length}
+        onSelectPreset={handleSelectPreset}
       />
 
-      {/* Main Workspace Stage Panel */}
-      <main className="flex-1 flex flex-col min-w-0 h-[calc(100vh-56px)] md:h-screen overflow-y-auto">
-        {currentView === "hub" && (
-          <WorkspaceHub
-            onStartVerification={handleStartVerification}
-            onNavigateToConsole={handleNavigateToConsole}
-            onSelectHistoryItem={handleSelectHistoryItem}
-            history={history}
-            engineStatus={engineStatus}
-          />
-        )}
+      {/* Main Single-View LLM Workspace Stage */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-8 py-8 sm:py-10 space-y-8">
+        {/* Workspace Intro Hero */}
+        <div className="text-center sm:text-left space-y-2">
+          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 font-sans">
+            AI Hallucination Verification Workspace
+          </h2>
+          <p className="text-sm text-slate-600 max-w-3xl leading-relaxed">
+            Deconstruct model assertions into atomic claims, cross-query Wikipedia and DuckDuckGo for ground-truth consensus, audit DOIs via CrossRef, and calculate calibrated certainty tiers in real time.
+          </p>
+        </div>
 
-        {currentView === "console" && (
-          <AnalysisConsole
-            onStartVerification={handleStartVerification}
-            isProcessing={isProcessing}
-            error={error}
-            initialText={consoleInitialText}
-          />
-        )}
+        {/* 1. Analysis Input Console */}
+        <LightConsole
+          onStartVerification={handleStartVerification}
+          isProcessing={isProcessing}
+          error={error}
+          text={text}
+          setText={setText}
+          model={model}
+          setModel={setModel}
+        />
 
-        {currentView === "results" && (
-          <ResultsDashboard
-            result={activeResult}
-            onVerifyAgain={() => navigate("console")}
-            onSelectPreset={(sample) =>
-              handleStartVerification({
-                text: sample,
-                model: "chatgpt",
-                verify_claims: true,
-                verify_citations: true,
-                verify_statistics: true,
-              })
-            }
-          />
-        )}
-
-        {currentView === "history" && (
-          <AuditHistory
-            history={history}
-            onSelectAudit={handleSelectHistoryItem}
-            onDeleteAudit={handleDeleteHistoryItem}
-            onClearAllHistory={handleClearAllHistory}
-            onNavigateToConsole={handleNewAudit}
-          />
-        )}
+        {/* 2. Dynamic Results Dashboard (Anchored below input) */}
+        <div ref={resultsRef} className="pt-2">
+          {activeResult ? (
+            <LightResults
+              result={activeResult}
+              onVerifyAgain={handleStartNew}
+            />
+          ) : (
+            <div className="glass-card-light rounded-2xl p-8 sm:p-12 text-center space-y-3 shadow-2xs">
+              <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto">
+                <span className="font-mono text-sm font-bold">01</span>
+              </div>
+              <h3 className="text-base font-bold text-slate-900 font-sans">
+                Ready to Verify Assertions
+              </h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                Paste any model response above and click <strong>“Run Autonomous Audit”</strong> to generate the clinical factual certainty report, highlighted sentence inspector, and DOI validation logs.
+              </p>
+            </div>
+          )}
+        </div>
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-200/80 bg-white py-6 px-4 sm:px-8 mt-12 text-xs text-slate-500 font-mono">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-slate-900">HalluciCheck v2.0</span>
+            <span>·</span>
+            <span>AI Hallucination Verification</span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <span className="text-emerald-700 font-semibold">● Ground Truth Consensus Active</span>
+            <span>Wikipedia REST · CrossRef DOI · DuckDuckGo</span>
+          </div>
+        </div>
+      </footer>
+
+      {/* History Slide-over Drawer */}
+      <HistoryDrawer
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        history={history}
+        onSelectAudit={handleSelectAudit}
+        onDeleteAudit={handleDeleteAudit}
+        onClearAllHistory={handleClearAllHistory}
+      />
     </div>
   );
 }
