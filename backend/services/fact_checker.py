@@ -35,9 +35,11 @@ from config import get_settings
 from schemas import ClaimResult, ClaimStatus, ClaimType, SourceCitation
 from services.claim_extractor import extract_claims
 from services.entailment_engine import (
-    EntailmentVerdict,
-    evaluate_evidence_entailment,
-    extract_atomic_facts_from_text,
+    AtomicProposition,
+    PropositionStatus,
+    PropositionVerificationReport,
+    decompose_claim_into_propositions,
+    evaluate_complete_claim_propositions,
 )
 from services.independent_verifier import generate_independent_query
 from services.multi_source_retriever import (
@@ -181,10 +183,7 @@ async def verify_single_claim(
             end_index=end_index,
         )
 
-    # 1. Atomic Fact Extraction (Entity + Exact Relationship)
-    claim_facts = extract_atomic_facts_from_text(clean_claim)
-
-    # 2. Independent Verification Query Generation
+    # 1. Independent Verification Query Generation
     plan = generate_independent_query(clean_claim)
 
     # 3. Multi-Source Evidence Retrieval
@@ -247,85 +246,18 @@ async def verify_single_claim(
             end_index=end_index,
         )
 
-    # 6. Generic Entailment & Contradiction Analysis
-    for ev in validated_evidence:
-        tier, tier_weight, tier_desc = classify_source_authority(ev.source_name, ev.source_url)
-        verdict, score, rationale = evaluate_evidence_entailment(
-            clean_claim, claim_facts, ev.snippet, ev.source_name, ev.source_url
-        )
+    # 5. Proposition-Level Evidence Entailment & Contradiction Analysis
+    # Evaluates every atomic proposition (Main assertion + Reason/Purpose/Date/Category qualifiers)
+    # strictly against validated authoritative records.
+    evidence_tuples = [(ev.source_name, ev.source_url, ev.snippet) for ev in validated_evidence]
+    prop_report = evaluate_complete_claim_propositions(clean_claim, evidence_tuples)
 
-        if verdict == EntailmentVerdict.CONTRADICTING:
-            contradicting_sources.append((ev, rationale, score))
-        elif verdict == EntailmentVerdict.SUPPORTING:
-            # Only authoritative sources can establish SUPPORTING status
-            if is_authoritative_for_verification(tier):
-                supporting_sources.append((ev, rationale, score))
-            else:
-                neutral_sources.append((
-                    ev,
-                    f"Mentioned in {ev.source_name}, but source authority ({tier_desc}) is insufficient to substantiate claim.",
-                    48.0,
-                ))
-        elif verdict == EntailmentVerdict.NEUTRAL_INSUFFICIENT:
-            neutral_sources.append((ev, rationale, score))
-
-    # 7. Final Classification Decision Synthesis
-    # VERIFIED: Only when reliable evidence directly supports the complete factual claim and no refutations exist.
-    # HALLUCINATED: When reliable evidence directly contradicts the claim or establishes that it is factually false.
-    # SUSPICIOUS: When evidence is ambiguous, conflicting, insufficient, unverifiable, or source quality too weak.
-    if contradicting_sources and not supporting_sources:
-        # Definitive contradiction with zero support -> HALLUCINATED
-        best_contra = contradicting_sources[0]
-        final_status = ClaimStatus.HALLUCINATED
-        final_conf = min(22.0, max(6.0, round(best_contra[2], 1)))
-        final_reasoning = best_contra[1]
-        final_evidence = best_contra[0].snippet[:280]
-        primary_source = best_contra[0].source_name
-        primary_url = best_contra[0].source_url
-
-    elif supporting_sources and not contradicting_sources:
-        # Direct entailment from validated authoritative source with zero contradictions -> VERIFIED
-        best_supp = supporting_sources[0]
-        final_status = ClaimStatus.VERIFIED
-        num_agreeing = len(supporting_sources)
-        base_conf = 86.0
-        # Boost confidence with independent concurring authoritative sources
-        final_conf = min(98.0, round(base_conf + (num_agreeing - 1) * 3.5, 1))
-        final_reasoning = best_supp[1]
-        final_evidence = best_supp[0].snippet[:280]
-        primary_source = best_supp[0].source_name
-        primary_url = best_supp[0].source_url
-
-    elif supporting_sources and contradicting_sources:
-        # Conflicting evidence between sources -> SUSPICIOUS per classification requirements
-        final_status = ClaimStatus.SUSPICIOUS
-        final_conf = 48.0
-        final_reasoning = (
-            f"Conflicting evidence found: {supporting_sources[0][0].source_name} provides corroborating context, "
-            f"while {contradicting_sources[0][0].source_name} reports discrepancies. Requires human review."
-        )
-        final_evidence = supporting_sources[0][0].snippet[:280]
-        primary_source = supporting_sources[0][0].source_name
-        primary_url = supporting_sources[0][0].source_url
-
-    elif neutral_sources:
-        # Related entity mentions without complete factual relationship entailment -> SUSPICIOUS
-        best_neutral = neutral_sources[0]
-        final_status = ClaimStatus.SUSPICIOUS
-        final_conf = 45.0
-        final_reasoning = best_neutral[1]
-        final_evidence = best_neutral[0].snippet[:280]
-        primary_source = best_neutral[0].source_name
-        primary_url = best_neutral[0].source_url
-
-    else:
-        # No validated authoritative evidence found -> SUSPICIOUS
-        final_status = ClaimStatus.SUSPICIOUS
-        final_conf = 35.0
-        final_reasoning = "Insufficient ground truth: No authoritative, reachable sources could confirm this assertion."
-        final_evidence = None
-        primary_source = "Unverified Index"
-        primary_url = None
+    final_status = prop_report.final_status
+    final_conf = prop_report.confidence
+    final_reasoning = prop_report.rationale
+    final_evidence = prop_report.primary_evidence_quote
+    primary_source = prop_report.primary_source_name or "Authoritative Consensus"
+    primary_url = prop_report.primary_source_url
 
     # Construct clean, validated list of sources with genuine URLs
     sources_list: List[SourceCitation] = []

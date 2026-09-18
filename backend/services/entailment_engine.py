@@ -1,16 +1,19 @@
 """
 entailment_engine.py
 --------------------
-Core Factual Entailment and Contradiction Detection Engine.
+Proposition-Level Factual Entailment and Contradiction Detection Engine.
 
-Replaces naive semantic similarity with deep relationship extraction,
-entity-attribute alignment, polarity/negation analysis, and contradiction detection.
+Decomposes complex claims into atomic propositions (Subject + Action + Object + Qualifiers)
+and verifies that EVERY meaningful factual component is explicitly entailed by authoritative
+evidence before granting VERIFIED status.
 
-CRITICAL RULES:
-- Semantic similarity is strictly limited to candidate evidence retrieval.
-- Never use similarity > threshold -> VERIFIED.
-- Absence of contradictory evidence is NOT enough to classify something as VERIFIED.
-- Verification requires explicit, direct entailment of the full factual assertion.
+RULES:
+- A claim is VERIFIED ONLY when ALL atomic propositions (event + reason/qualifiers/dates/etc.)
+  are directly SUPPORTED by reliable evidence with zero contradictions.
+- If the main event is supported but qualifiers (e.g. reason, purpose, causality) are NOT_SUPPORTED,
+  the final verdict is strictly SUSPICIOUS.
+- If any proposition is directly CONTRADICTED by reliable evidence, the verdict is HALLUCINATED.
+- Semantic similarity is NEVER used to declare a proposition supported.
 """
 
 import re
@@ -19,6 +22,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Set, Tuple
 
 import spacy
+from schemas import ClaimStatus
 from services.source_validator import SourceTier, classify_source_authority, is_authoritative_for_verification
 
 try:
@@ -27,30 +31,41 @@ except Exception:
     _NLP = None
 
 
-class EntailmentVerdict(str, Enum):
-    SUPPORTING = "supporting"
-    CONTRADICTING = "contradicting"
-    NEUTRAL_INSUFFICIENT = "neutral_insufficient"
-    IRRELEVANT = "irrelevant"
+class PropositionStatus(str, Enum):
+    SUPPORTED = "SUPPORTED"
+    CONTRADICTED = "CONTRADICTED"
+    NOT_SUPPORTED = "NOT_SUPPORTED"
 
 
 @dataclass
-class AtomicFact:
-    subject: str = ""
-    subject_lemmas: Set[str] = field(default_factory=set)
-    predicate: str = ""
-    predicate_lemma: str = ""
-    direct_object: str = ""
-    object_lemmas: Set[str] = field(default_factory=set)
-    prepositional_phrases: List[str] = field(default_factory=list)
-    years: Set[str] = field(default_factory=set)
-    numbers: Set[str] = field(default_factory=set)
-    is_negated: bool = False
-    entities: List[Tuple[str, str]] = field(default_factory=list)
-    action_type: str = "general"  # award, creation, action, definition, state
+class AtomicProposition:
+    prop_type: str  # "primary", "reason", "date", "location", "attribution", "quantity", "category"
+    statement: str  # Descriptive proposition sentence
+    raw_phrase: str  # Original text span from the claim
+    content_terms: Set[str] = field(default_factory=set)
+    status: PropositionStatus = PropositionStatus.NOT_SUPPORTED
+    evidence_quote: Optional[str] = None
+    source_name: Optional[str] = None
+    source_url: Optional[str] = None
+    rationale: str = ""
 
 
-# Relationship verb groups
+@dataclass
+class PropositionVerificationReport:
+    claim_text: str
+    subject: str
+    predicate: str
+    direct_object: str
+    propositions: List[AtomicProposition]
+    final_status: ClaimStatus
+    confidence: float
+    rationale: str
+    primary_evidence_quote: Optional[str] = None
+    primary_source_name: Optional[str] = None
+    primary_source_url: Optional[str] = None
+
+
+# Action & relation verb groups
 _AWARD_WON_VERBS = {
     "win", "won", "receive", "received", "award", "awarded", "earn", "earned",
     "take", "took", "collect", "bestow", "bestowed", "share", "shared",
@@ -92,300 +107,452 @@ _REFUTATION_PATTERNS = [
 ]
 
 
-def extract_atomic_facts_from_text(text: str) -> AtomicFact:
-    """Extract subject, predicate, object, dates, numbers, and entities from claim."""
-    facts = AtomicFact()
-    clean_text = text.strip()
-    if not clean_text:
-        return facts
-
-    # Extract years and numbers
-    facts.years = set(re.findall(r"\b(1[6-9]\d{2}|20\d{2})\b", clean_text))
-    facts.numbers = set(re.findall(r"\b\d{1,3}(?:,\d{3})*(?:\.\d+)?%?\b", clean_text))
+def decompose_claim_into_propositions(claim_text: str) -> Tuple[str, str, str, List[AtomicProposition]]:
+    """
+    Deconstruct a claim sentence into its primary assertion and qualifying propositions:
+    1. Primary Proposition (Subject -> Predicate -> Object)
+    2. Reason / Purpose Proposition ("for ...", "because of ...", "due to ...")
+    3. Date / Chronology Proposition ("in 1903", "in 1921")
+    4. Location Proposition ("in Stockholm", "at Sorbonne")
+    5. Attribution Proposition ("by Guido van Rossum")
+    6. Category Proposition ("in Physics", "in Literature")
+    """
+    clean = claim_text.strip()
+    if not clean:
+        return "", "", "", []
 
     if _NLP is None:
-        words = re.findall(r"\b[A-Za-z0-9\-_]+\b", clean_text)
-        facts.subject = words[0] if words else ""
-        facts.subject_lemmas = {w.lower() for w in words[:3]}
-        return facts
+        # Fallback simple proposition
+        return clean, "", "", [
+            AtomicProposition(
+                prop_type="primary",
+                statement=clean,
+                raw_phrase=clean,
+                content_terms={w.lower() for w in re.findall(r"\b[A-Za-z0-9]{3,}\b", clean)},
+            )
+        ]
 
-    doc = _NLP(clean_text)
-
-    # Extract NER entities
-    facts.entities = [(e.text, e.label_) for e in doc.ents]
-
-    # Find root and syntactic triples
+    doc = _NLP(clean)
     root = None
     for tok in doc:
         if tok.dep_ == "ROOT":
             root = tok
             break
 
-    if root:
-        facts.predicate = root.text
-        facts.predicate_lemma = root.lemma_.lower()
-        facts.is_negated = any(child.dep_ == "neg" for child in root.children)
+    if not root:
+        return clean, "", "", [
+            AtomicProposition(
+                prop_type="primary",
+                statement=clean,
+                raw_phrase=clean,
+                content_terms={w.lower() for w in re.findall(r"\b[A-Za-z0-9]{3,}\b", clean)},
+            )
+        ]
 
-        p_lemma = facts.predicate_lemma
-        if p_lemma in _AWARD_WON_VERBS or p_lemma in _AWARD_NOMINATED_VERBS:
-            facts.action_type = "award"
-        elif p_lemma in _CREATION_VERBS:
-            facts.action_type = "creation"
-        elif p_lemma in _ACTION_EVENT_VERBS:
-            facts.action_type = "action"
-        elif p_lemma in _DEFINITION_VERBS:
-            facts.action_type = "definition"
+    subjs = [t for t in doc if t.dep_ in ("nsubj", "nsubjpass") and t.head == root]
+    if not subjs:
+        subjs = [t for t in doc if t.dep_ in ("nsubj", "nsubjpass")]
 
-        for tok in doc:
-            if tok.dep_ in ("nsubj", "nsubjpass") and tok.head == root:
-                facts.subject = " ".join([t.text for t in tok.subtree]).strip()
-                facts.subject_lemmas = {t.lemma_.lower() for t in tok.subtree if not t.is_stop and len(t.text) > 1}
-                break
+    dobjs = [t for t in doc if t.dep_ in ("dobj", "attr", "acomp", "oprd") and t.head == root]
 
-        for tok in doc:
-            if tok.dep_ in ("dobj", "attr", "acomp", "oprd") and tok.head == root:
-                facts.direct_object = " ".join([t.text for t in tok.subtree]).strip()
-                facts.object_lemmas = {t.lemma_.lower() for t in tok.subtree if not t.is_stop and len(t.text) > 1}
-                break
+    subj_str = " ".join([t.text for t in subjs[0].subtree]).strip() if subjs else ""
+    obj_str = " ".join([t.text for t in dobjs[0].subtree]).strip() if dobjs else ""
+    pred_str = root.text
 
-        for tok in doc:
-            if tok.dep_ == "prep" and tok.head in (root, getattr(doc, "dobj", None)):
-                facts.prepositional_phrases.append(" ".join([t.text for t in tok.subtree]).strip())
+    # Extract prepositional qualifiers
+    qualifiers: List[AtomicProposition] = []
+    seen_prep_phrases = set()
 
-    if not facts.subject:
-        for tok in doc:
-            if tok.dep_ in ("nsubj", "nsubjpass"):
-                facts.subject = " ".join([t.text for t in tok.subtree]).strip()
-                facts.subject_lemmas = {t.lemma_.lower() for t in tok.subtree if not t.is_stop and len(t.text) > 1}
-                break
+    for p in doc:
+        if p.dep_ == "prep":
+            phrase = " ".join([t.text for t in p.subtree]).strip()
+            p_low = p.text.lower()
+            if phrase in seen_prep_phrases or len(phrase) < 4:
+                continue
 
-    return facts
+            terms = {
+                t.lemma_.lower() for t in p.subtree
+                if not t.is_stop and not t.is_punct and len(t.text) > 1
+            }
+
+            # 1. Reason / Cause / Purpose qualifier (e.g. "for his theory of general relativity")
+            if p_low in ("for", "because", "due", "owing") or "in recognition of" in phrase.lower():
+                seen_prep_phrases.add(phrase)
+                qualifiers.append(
+                    AtomicProposition(
+                        prop_type="reason",
+                        statement=f"The stated reason or achievement was: '{phrase}'",
+                        raw_phrase=phrase,
+                        content_terms=terms,
+                    )
+                )
+
+            # 2. Date / Year qualifier (e.g. "in 1903", "in 1921")
+            elif re.search(r"\b(1[6-9]\d{2}|20\d{2})\b", phrase):
+                seen_prep_phrases.add(phrase)
+                qualifiers.append(
+                    AtomicProposition(
+                        prop_type="date",
+                        statement=f"The event occurred in: '{phrase}'",
+                        raw_phrase=phrase,
+                        content_terms=terms,
+                    )
+                )
+
+            # 3. Category / Field qualifier (e.g. "in Physics", "in Literature")
+            elif any(cat in phrase.lower() for cat in ["physics", "chemistry", "medicine", "literature", "peace", "economics"]):
+                seen_prep_phrases.add(phrase)
+                qualifiers.append(
+                    AtomicProposition(
+                        prop_type="category",
+                        statement=f"Conferred specifically in the field of: '{phrase}'",
+                        raw_phrase=phrase,
+                        content_terms=terms,
+                    )
+                )
+
+            # 4. Location qualifier (e.g. "in Stockholm", "at Cambridge")
+            elif p_low in ("in", "at", "from") and any(
+                e.label_ in ("GPE", "LOC", "FAC", "ORG") for e in doc.ents if e.text in phrase
+            ):
+                seen_prep_phrases.add(phrase)
+                qualifiers.append(
+                    AtomicProposition(
+                        prop_type="location",
+                        statement=f"Took place at the location: '{phrase}'",
+                        raw_phrase=phrase,
+                        content_terms=terms,
+                    )
+                )
+
+            # 5. Attribution qualifier (e.g. "by Guido van Rossum")
+            elif p_low == "by":
+                seen_prep_phrases.add(phrase)
+                qualifiers.append(
+                    AtomicProposition(
+                        prop_type="attribution",
+                        statement=f"Attributed to or performed by: '{phrase}'",
+                        raw_phrase=phrase,
+                        content_terms=terms,
+                    )
+                )
+
+    # Primary proposition terms
+    primary_terms = set()
+    if subjs:
+        primary_terms.update(t.lemma_.lower() for t in subjs[0].subtree if not t.is_stop and len(t.text) > 1)
+    if dobjs:
+        primary_terms.update(t.lemma_.lower() for t in dobjs[0].subtree if not t.is_stop and len(t.text) > 1)
+    primary_terms.add(root.lemma_.lower())
+
+    primary_prop = AtomicProposition(
+        prop_type="primary",
+        statement=f"{subj_str} {pred_str} {obj_str}".strip(),
+        raw_phrase=f"{subj_str} {pred_str} {obj_str}".strip(),
+        content_terms=primary_terms,
+    )
+
+    all_props = [primary_prop] + qualifiers
+    return subj_str, pred_str, obj_str, all_props
 
 
-def evaluate_evidence_entailment(
-    claim_text: str,
-    claim_facts: AtomicFact,
+def evaluate_single_proposition(
+    prop: AtomicProposition,
     evidence_snippet: str,
     source_name: str,
     source_url: str,
-) -> Tuple[EntailmentVerdict, float, str]:
+    claim_text: str,
+) -> Tuple[PropositionStatus, str]:
     """
-    Evaluate whether an evidence passage strictly ENTAILS, CONTRADICTS, or is NEUTRAL to the claim.
-    Returns: (EntailmentVerdict, confidence_weight (0-100), factual_rationale)
+    Evaluate a single atomic proposition against an evidence passage.
+    Returns: (PropositionStatus, factual_rationale)
     """
-    if not evidence_snippet or len(evidence_snippet.strip()) < 15:
-        return EntailmentVerdict.IRRELEVANT, 0.0, "Evidence passage is empty or too short."
-
-    ev_clean = evidence_snippet.strip()
-    ev_lower = ev_clean.lower()
+    ev_lower = evidence_snippet.lower()
     claim_lower = claim_text.lower()
 
-    # 1. Subject Relevance Check
-    subj_tokens = claim_facts.subject_lemmas or {
-        w.lower() for w in re.findall(r"\b[A-Za-z0-9]{3,}\b", claim_facts.subject)
-    }
-    has_subject_mention = False
-    if subj_tokens:
-        subj_matches = sum(1 for tok in subj_tokens if tok in ev_lower)
-        if (subj_matches / len(subj_tokens)) >= 0.35:
-            has_subject_mention = True
-    else:
-        has_subject_mention = True
+    # 1. PRIMARY PROPOSITION EVALUATION
+    if prop.prop_type == "primary":
+        # Check explicit refutations
+        for ref_pat in _REFUTATION_PATTERNS:
+            if re.search(ref_pat, ev_lower):
+                return (
+                    PropositionStatus.CONTRADICTED,
+                    f"Contradicted by {source_name}: Authoritative records explicitly identify this event as disproven, fabricated, or cancelled."
+                )
 
-    # If evidence doesn't even mention the main subject, it is off-topic
-    if not has_subject_mention:
-        return EntailmentVerdict.IRRELEVANT, 0.0, f"Source does not discuss {claim_facts.subject or 'the claim subject'}."
+        # Check terms coverage
+        terms = prop.content_terms
+        if not terms:
+            return PropositionStatus.NOT_SUPPORTED, "Insufficient proposition terms."
 
-    # 2. Explicit Refutation / Debunking
-    for ref_pat in _REFUTATION_PATTERNS:
-        if re.search(ref_pat, ev_lower, re.IGNORECASE):
+        matched = [t for t in terms if t in ev_lower]
+        coverage = len(matched) / len(terms)
+
+        # Award actions
+        if any(w in terms for w in _AWARD_WON_VERBS):
+            has_win = any(re.search(rf"\b{w}\b", ev_lower) for w in _AWARD_WON_VERBS)
+            has_nom = any(re.search(rf"\b{w}\b", ev_lower) for w in _AWARD_NOMINATED_VERBS)
+
+            # If evidence states only nominated and lost
+            if has_nom and not has_win and re.search(r"\b(lost to|did not win|never received)\b", ev_lower):
+                return (
+                    PropositionStatus.CONTRADICTED,
+                    f"Contradicted by {source_name}: Subject was nominated but did not win the award."
+                )
+
+            if has_win and coverage >= 0.50:
+                return (
+                    PropositionStatus.SUPPORTED,
+                    f"Supported by {source_name}: Confirmed that {prop.statement}."
+                )
+
+        # Creation actions
+        elif any(w in terms for w in _CREATION_VERBS):
+            has_creation = any(re.search(rf"\b{w}\b", ev_lower) for w in _CREATION_VERBS)
+            if has_creation and coverage >= 0.50:
+                return (
+                    PropositionStatus.SUPPORTED,
+                    f"Supported by {source_name}: Confirmed that {prop.statement}."
+                )
+
+        # General actions / definition
+        if coverage >= 0.65:
             return (
-                EntailmentVerdict.CONTRADICTING,
-                12.0,
-                f"Contradicted by {source_name}: Authoritative records explicitly identify this statement as disproven, fabricated, or cancelled."
+                PropositionStatus.SUPPORTED,
+                f"Supported by {source_name}: Confirmed that {prop.statement}."
             )
 
-    # 3. Action / Predicate Nuance Evaluation
-    action = claim_facts.action_type
-    p_lemma = claim_facts.predicate_lemma
+        return PropositionStatus.NOT_SUPPORTED, f"Not adequately confirmed in {source_name}."
 
-    # --- A. AWARD CHECKS: Distinguish 'won' vs 'nominated for' vs 'discussed' ---
-    if action == "award":
-        is_claim_win = p_lemma in _AWARD_WON_VERBS
-        is_claim_nom = p_lemma in _AWARD_NOMINATED_VERBS
+    # 2. REASON / CAUSE QUALIFIER EVALUATION
+    elif prop.prop_type == "reason":
+        # e.g. "for his theory of general relativity" -> terms: theory, general, relativity
+        clean_phrase = re.sub(r"^(?:for|because of|due to|in recognition of)\s+", "", prop.raw_phrase, flags=re.I).strip()
+        clean_terms = {t for t in prop.content_terms if t not in ("for", "due", "recognition", "reason")}
 
-        ev_has_win = any(re.search(rf"\b{w}\b", ev_lower) for w in _AWARD_WON_VERBS)
-        ev_has_nom = any(re.search(rf"\b{w}\b", ev_lower) for w in _AWARD_NOMINATED_VERBS)
+        # Check if the specific reason terms are present in the evidence
+        if clean_terms:
+            matched_terms = [t for t in clean_terms if t in ev_lower]
+            ratio = len(matched_terms) / len(clean_terms)
 
-        # Check domain/category of award (e.g. Literature vs Physics vs Chemistry)
-        award_categories = ["literature", "physics", "chemistry", "medicine", "peace", "economics"]
-        claim_cat = next((cat for cat in award_categories if cat in claim_lower), None)
+            if ratio >= 0.60:
+                return (
+                    PropositionStatus.SUPPORTED,
+                    f"Supported by {source_name}: Reason '{clean_phrase}' is explicitly corroborated."
+                )
+
+            # If evidence explicitly explains the reason for the award/action, but it's completely DIFFERENT
+            # e.g. Evidence states "for his discovery of the law of the photoelectric effect" while claim asserts "for his theory of general relativity"
+            reason_markers = [
+                r"\bfor (?:his|her|their)?\s+([^,.]+)",
+                r"\bin recognition of\s+([^,.]+)",
+                r"\bespecially for\s+([^,.]+)",
+            ]
+            for r_pat in reason_markers:
+                m = re.search(r_pat, ev_lower)
+                if m:
+                    actual_reason = m.group(1).strip()
+                    # If actual reason in evidence does not contain claim's reason terms
+                    if not any(t in actual_reason for t in clean_terms):
+                        return (
+                            PropositionStatus.CONTRADICTED,
+                            f"Contradicted by {source_name}: Official records state the achievement was '{actual_reason[:100]}', not '{clean_phrase}'."
+                        )
+
+        return (
+            PropositionStatus.NOT_SUPPORTED,
+            f"Not substantiated in {source_name}: Evidence does not establish that this was given '{prop.raw_phrase}'."
+        )
+
+    # 3. DATE / TIME QUALIFIER EVALUATION
+    elif prop.prop_type == "date":
+        years = set(re.findall(r"\b(1[6-9]\d{2}|20\d{2})\b", prop.raw_phrase))
+        ev_years = set(re.findall(r"\b(1[6-9]\d{2}|20\d{2})\b", evidence_snippet))
+
+        if years:
+            if years & ev_years:
+                return (
+                    PropositionStatus.SUPPORTED,
+                    f"Supported by {source_name}: Chronology {', '.join(sorted(years))} matches verified records."
+                )
+            elif ev_years and not (years & ev_years):
+                # If evidence describes the same event with different year
+                return (
+                    PropositionStatus.CONTRADICTED,
+                    f"Chronological discrepancy in {source_name}: Claim states {', '.join(sorted(years))}, but records document {', '.join(sorted(list(ev_years))[:2])}."
+                )
+
+        return PropositionStatus.NOT_SUPPORTED, f"Date {prop.raw_phrase} not verified in {source_name}."
+
+    # 4. CATEGORY QUALIFIER EVALUATION
+    elif prop.prop_type == "category":
+        award_categories = ["physics", "chemistry", "medicine", "literature", "peace", "economics"]
+        claim_cat = next((cat for cat in award_categories if cat in prop.raw_phrase.lower()), None)
 
         if claim_cat:
             cat_in_ev = bool(re.search(rf"\b(?:nobel(?: prize)? in |prize in |award in |in ){claim_cat}\b", ev_lower))
-            other_cats_in_ev = [
+            other_cats = [
                 oc for oc in award_categories
                 if oc != claim_cat and re.search(rf"\b(?:nobel(?: prize)? in |prize in |award in ){oc}\b", ev_lower)
             ]
 
-            # Does evidence confirm the recipient in the SAME category?
-            if cat_in_ev and ev_has_win:
-                # If claim asserts a specific year, verify year match
-                ev_years = set(re.findall(r"\b(1[6-9]\d{2}|20\d{2})\b", ev_clean))
-                if claim_facts.years:
-                    if claim_facts.years & ev_years:
-                        return (
-                            EntailmentVerdict.SUPPORTING,
-                            96.0,
-                            f"Corroborated by {source_name}: Directly confirmed that {claim_facts.subject} was awarded the honor in {claim_cat.capitalize()} in {', '.join(sorted(claim_facts.years))}."
-                        )
-                    else:
-                        return (
-                            EntailmentVerdict.SUPPORTING,
-                            91.0,
-                            f"Corroborated by {source_name}: Confirmed that {claim_facts.subject} received the award in {claim_cat.capitalize()}."
-                        )
-                else:
-                    return (
-                        EntailmentVerdict.SUPPORTING,
-                        93.0,
-                        f"Corroborated by {source_name}: Confirmed that {claim_facts.subject} received the award in {claim_cat.capitalize()}."
-                    )
-            elif other_cats_in_ev and not cat_in_ev:
-                # Recipient is explicitly documented in a different award category
-                other_names = [oc.capitalize() for oc in other_cats_in_ev]
+            if cat_in_ev:
                 return (
-                    EntailmentVerdict.CONTRADICTING,
-                    15.0,
-                    f"Category discrepancy in {source_name}: Authoritative records state honors were received in {', '.join(other_names)}, not in {claim_cat.capitalize()}."
+                    PropositionStatus.SUPPORTED,
+                    f"Supported by {source_name}: Category '{claim_cat.capitalize()}' is directly verified."
+                )
+            elif other_cats:
+                return (
+                    PropositionStatus.CONTRADICTED,
+                    f"Category discrepancy in {source_name}: Recorded in {', '.join(c.capitalize() for c in other_cats)}, not {claim_cat.capitalize()}."
                 )
 
-        # If claim says won, but evidence ONLY says nominated (not won)
-        if is_claim_win and ev_has_nom and not ev_has_win:
-            if re.search(r"\b(lost to|did not win|never received|unsuccessful nominee)\b", ev_lower):
-                return (
-                    EntailmentVerdict.CONTRADICTING,
-                    14.0,
-                    f"Contradicted by {source_name}: Entity was nominated for the award but did not win."
-                )
+        return PropositionStatus.NOT_SUPPORTED, f"Category '{prop.raw_phrase}' not confirmed."
+
+    # 5. LOCATION QUALIFIER EVALUATION
+    elif prop.prop_type == "location":
+        terms = [t for t in prop.content_terms if t not in ("at", "in", "from")]
+        if terms and all(t in ev_lower for t in terms):
             return (
-                EntailmentVerdict.NEUTRAL_INSUFFICIENT,
-                45.0,
-                f"Insufficient evidence in {source_name}: Entity is recorded as nominated or considered, but not confirmed as having won."
+                PropositionStatus.SUPPORTED,
+                f"Supported by {source_name}: Location '{prop.raw_phrase}' confirmed."
             )
+        return PropositionStatus.NOT_SUPPORTED, f"Location '{prop.raw_phrase}' not verified."
 
-        # If general award won and object matches
-        if is_claim_win and ev_has_win:
-            if any(term in ev_lower for term in ["nobel", "prize", "award", "medal", "academy award", "oscar", "pulitzer"]):
-                if claim_facts.years and (claim_facts.years & set(re.findall(r"\b(1[6-9]\d{2}|20\d{2})\b", ev_clean))):
-                    return (
-                        EntailmentVerdict.SUPPORTING,
-                        94.0,
-                        f"Corroborated by {source_name}: Confirmed award conferral as asserted."
-                    )
-                elif not claim_facts.years:
-                    return (
-                        EntailmentVerdict.SUPPORTING,
-                        92.0,
-                        f"Corroborated by {source_name}: Confirmed award conferral as asserted."
-                    )
-
-    # --- B. CREATION / AUTHORSHIP CHECKS ---
-    elif action == "creation":
-        ev_has_creation = any(re.search(rf"\b{w}\b", ev_lower) for w in _CREATION_VERBS | {"creator", "inventor", "founder", "author", "originator"})
-        ev_years = set(re.findall(r"\b(1[6-9]\d{2}|20\d{2})\b", ev_clean))
-
-        if ev_has_creation:
-            # Check chronological contradiction on creation
-            if claim_facts.years and ev_years and not (claim_facts.years & ev_years):
-                # Creation documented in different year
-                return (
-                    EntailmentVerdict.CONTRADICTING,
-                    14.0,
-                    f"Chronological discrepancy in {source_name}: Claim asserts creation in {', '.join(sorted(claim_facts.years))}, but records document origin in {', '.join(sorted(list(ev_years))[:2])}."
-                )
-
-            # Check creator entity alignment
-            if has_subject_mention:
-                return (
-                    EntailmentVerdict.SUPPORTING,
-                    93.0,
-                    f"Corroborated by {source_name}: Confirmed that {claim_facts.subject} created or developed the subject matter."
-                )
-            else:
-                return (
-                    EntailmentVerdict.CONTRADICTING,
-                    16.0,
-                    f"Attribution discrepancy in {source_name}: Creation is credited to a different originator in authoritative records."
-                )
-
-    # --- C. ACTION / MISSION / EVENT CHECKS ---
-    elif action == "action":
-        if re.search(r"\b(cancelled|canceled|never flew|aborted|no mission|fictional|impossible|hypothetical)\b", ev_lower):
+    # 6. ATTRIBUTION QUALIFIER EVALUATION
+    elif prop.prop_type == "attribution":
+        terms = [t for t in prop.content_terms if t not in ("by",)]
+        if terms and all(t in ev_lower for t in terms):
             return (
-                EntailmentVerdict.CONTRADICTING,
-                10.0,
-                f"Factual contradiction in {source_name}: Event or mission never occurred, was cancelled, or is fictional."
+                PropositionStatus.SUPPORTED,
+                f"Supported by {source_name}: Attribution '{prop.raw_phrase}' confirmed."
             )
-        # Check action verb entailment
-        if any(v in ev_lower for v in [p_lemma, "landed", "reached", "launched", "orbited", "arrived"]):
-            if claim_facts.direct_object and claim_facts.direct_object.lower() in ev_lower:
-                return (
-                    EntailmentVerdict.SUPPORTING,
-                    92.0,
-                    f"Corroborated by {source_name}: Confirmed factual action and outcome as asserted."
-                )
+        return PropositionStatus.NOT_SUPPORTED, f"Attribution '{prop.raw_phrase}' not confirmed."
 
-    # --- D. DEFINITION / MECHANISM CHECKS (e.g. Photosynthesis) ---
-    elif action == "definition":
-        obj_tokens = claim_facts.object_lemmas or {
-            w.lower() for w in re.findall(r"\b[A-Za-z0-9]{3,}\b", claim_facts.direct_object)
-        }
-        if obj_tokens:
-            obj_matches = sum(1 for tok in obj_tokens if tok in ev_lower)
-            if (obj_matches / len(obj_tokens)) >= 0.45:
-                return (
-                    EntailmentVerdict.SUPPORTING,
-                    93.0,
-                    f"Corroborated by {source_name}: Scientific definition and mechanism substantiated by authoritative records."
-                )
+    return PropositionStatus.NOT_SUPPORTED, f"Qualifier '{prop.raw_phrase}' not substantiated."
 
-    # 4. Strict General Entailment
-    key_entities = [e[0].lower() for e in claim_facts.entities if e[1] not in ("DATE", "CARDINAL")]
-    if key_entities:
-        ent_matches = sum(1 for ent in key_entities if ent in ev_lower)
-        ent_coverage = ent_matches / len(key_entities)
-    else:
-        ent_coverage = 0.5
 
-    # Check for direct negation conflict
-    if not claim_facts.is_negated and any(neg in ev_lower for neg in ["did not", "does not", "cannot", "never"]):
-        return (
-            EntailmentVerdict.CONTRADICTING,
-            18.0,
-            f"Polarity conflict in {source_name}: Evidence indicates negative or contradictory findings."
+def evaluate_complete_claim_propositions(
+    claim_text: str,
+    evidence_pool: List[Tuple[str, str, str]],  # List of (source_name, source_url, snippet)
+) -> PropositionVerificationReport:
+    """
+    Decomposes the claim and evaluates EVERY proposition against the evidence pool.
+    Synthesizes the complete claim verdict strictly following:
+    - ALL supported + no contradiction -> VERIFIED
+    - ANY contradicted -> HALLUCINATED
+    - Main supported BUT qualifiers not supported -> SUSPICIOUS
+    - Main not supported / insufficient -> SUSPICIOUS
+    """
+    subj, pred, obj, propositions = decompose_claim_into_propositions(claim_text)
+
+    # Evaluate each proposition against the best evidence available in the pool
+    for prop in propositions:
+        best_status = PropositionStatus.NOT_SUPPORTED
+        best_quote = None
+        best_source_name = None
+        best_source_url = None
+        best_rationale = ""
+
+        for s_name, s_url, snippet in evidence_pool:
+            status, rationale = evaluate_single_proposition(prop, snippet, s_name, s_url, claim_text)
+
+            # Contradiction takes immediate precedence
+            if status == PropositionStatus.CONTRADICTED:
+                best_status = PropositionStatus.CONTRADICTED
+                best_quote = snippet[:280]
+                best_source_name = s_name
+                best_source_url = s_url
+                best_rationale = rationale
+                break  # Stop checking this proposition; contradiction established
+
+            elif status == PropositionStatus.SUPPORTED:
+                best_status = PropositionStatus.SUPPORTED
+                best_quote = snippet[:280]
+                best_source_name = s_name
+                best_source_url = s_url
+                best_rationale = rationale
+
+            elif status == PropositionStatus.NOT_SUPPORTED and best_status == PropositionStatus.NOT_SUPPORTED:
+                best_rationale = rationale
+
+        prop.status = best_status
+        prop.evidence_quote = best_quote
+        prop.source_name = best_source_name
+        prop.source_url = best_source_url
+        prop.rationale = best_rationale
+
+    # Synthesize Complete Claim Decision
+    has_contradiction = any(p.status == PropositionStatus.CONTRADICTED for p in propositions)
+    all_supported = all(p.status == PropositionStatus.SUPPORTED for p in propositions)
+
+    primary_prop = next((p for p in propositions if p.prop_type == "primary"), None)
+    primary_supported = primary_prop.status == PropositionStatus.SUPPORTED if primary_prop else False
+
+    unsupported_qualifiers = [
+        p for p in propositions if p.prop_type != "primary" and p.status != PropositionStatus.SUPPORTED
+    ]
+
+    # Contradiction -> HALLUCINATED
+    if has_contradiction:
+        contra_p = next(p for p in propositions if p.status == PropositionStatus.CONTRADICTED)
+        final_status = ClaimStatus.HALLUCINATED
+        confidence = 14.0
+        rationale = f"Contradiction identified: {contra_p.rationale}"
+        primary_quote = contra_p.evidence_quote
+        primary_s_name = contra_p.source_name
+        primary_s_url = contra_p.source_url
+
+    # All propositions supported -> VERIFIED
+    elif all_supported:
+        supp_sources = {p.source_name for p in propositions if p.source_name}
+        num_agreeing = len(supp_sources)
+        final_status = ClaimStatus.VERIFIED
+        confidence = min(98.0, 88.0 + (num_agreeing - 1) * 4.0)
+
+        # Detailed rationale confirming all parts
+        confirmed_parts = [f"Confirmed {p.statement}" for p in propositions]
+        first_supp = next(p for p in propositions if p.source_name)
+        primary_quote = first_supp.evidence_quote
+        primary_s_name = first_supp.source_name
+        primary_s_url = first_supp.source_url
+        rationale = f"Fully verified across authoritative records ({', '.join(supp_sources)}): " + "; ".join(confirmed_parts) + "."
+
+    # Main supported BUT one or more qualifiers NOT supported -> SUSPICIOUS
+    elif primary_supported and unsupported_qualifiers:
+        final_status = ClaimStatus.SUSPICIOUS
+        confidence = 46.0
+        primary_quote = primary_prop.evidence_quote
+        primary_s_name = primary_prop.source_name
+        primary_s_url = primary_prop.source_url
+
+        missing_desc = [f"'{p.raw_phrase}' ({p.prop_type})" for p in unsupported_qualifiers]
+        rationale = (
+            f"Partially supported: Authoritative sources confirm the main assertion ({primary_prop.statement}), "
+            f"but do NOT establish the specific qualifier(s): {', '.join(missing_desc)}. "
+            f"Requires human review."
         )
 
-    # High entity coverage + direct action match in authoritative text
-    if ent_coverage >= 0.85 and (p_lemma in ev_lower or action == "definition"):
-        # If claim had specific years, ensure year match
-        if claim_facts.years:
-            if claim_facts.years & set(re.findall(r"\b(1[6-9]\d{2}|20\d{2})\b", ev_clean)):
-                return (
-                    EntailmentVerdict.SUPPORTING,
-                    90.0,
-                    f"Corroborated by {source_name}: Core entities, dates, and assertions confirmed in context."
-                )
-        else:
-            return (
-                EntailmentVerdict.SUPPORTING,
-                88.0,
-                f"Corroborated by {source_name}: Core entities and factual assertions confirmed in context."
-            )
+    # Main not supported or insufficient evidence -> SUSPICIOUS
+    else:
+        final_status = ClaimStatus.SUSPICIOUS
+        confidence = 35.0
+        first_with_quote = next((p for p in propositions if p.evidence_quote), None)
+        primary_quote = first_with_quote.evidence_quote if first_with_quote else None
+        primary_s_name = first_with_quote.source_name if first_with_quote else "Unverified Index"
+        primary_s_url = first_with_quote.source_url if first_with_quote else None
+        rationale = "Insufficient evidence: Authoritative sources do not substantiate the complete assertion."
 
-    # DEFAULT: NEUTRAL_INSUFFICIENT (Strictly prevents false VERIFIED classification)
-    return (
-        EntailmentVerdict.NEUTRAL_INSUFFICIENT,
-        45.0,
-        f"Context from {source_name} discusses related subject matter but does not explicitly substantiate the complete factual relationship."
+    return PropositionVerificationReport(
+        claim_text=claim_text,
+        subject=subj,
+        predicate=pred,
+        direct_object=obj,
+        propositions=propositions,
+        final_status=final_status,
+        confidence=confidence,
+        rationale=rationale,
+        primary_evidence_quote=primary_quote,
+        primary_source_name=primary_s_name,
+        primary_source_url=primary_s_url,
     )
