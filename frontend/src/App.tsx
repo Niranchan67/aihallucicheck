@@ -1,16 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { getHealth, verifyContent, getVerification } from "./api/client";
-import {
-  getInitialVerificationResult,
-  parseTextToVerification,
-  DEFAULT_DEMO_TEXT,
-} from "./api/mockDataParser";
+import { getStoredVerificationResult, parseTextToVerification } from "./api/mockDataParser";
 import { HeaderBar } from "./components/HeaderBar";
 import { HomeCoverView } from "./components/HomeCoverView";
-import { LightConsole, PRESET_OPTIONS } from "./components/LightConsole";
+import { LightConsole } from "./components/LightConsole";
 import { LightResults } from "./components/LightResults";
 import { LightHistory } from "./components/LightHistory";
-import { BarChart3, ArrowRight, Play, Sparkles } from "lucide-react";
+import { BarChart3, ArrowRight, Terminal } from "lucide-react";
 import type {
   AppTab,
   AiModel,
@@ -49,20 +45,19 @@ export default function App() {
     }
   };
 
-  // 2. Core Application State with Self-Healing Mock/Demo Parser
-  const [text, setText] = useState(DEFAULT_DEMO_TEXT);
+  // 2. Core Application State (Clean & Empty by default)
+  const [text, setText] = useState("");
   const [model, setModel] = useState<AiModel>("chatgpt");
-  const [activeResult, setActiveResult] = useState<VerificationResponse>(
-    getInitialVerificationResult
+  const [activeResult, setActiveResult] = useState<VerificationResponse | null>(() =>
+    getStoredVerificationResult()
   );
   const [history, setHistory] = useState<(VerificationResponse | VerificationHistoryItem)[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [engineStatus, setEngineStatus] = useState("Checking…");
 
-  // 3. Initial LocalStorage Bridge, Hash Listener & System Health
+  // 3. Initial Setup, Browser History Listener & System Health
   useEffect(() => {
-    // Sync hash changes from browser history navigation
     const handleHashChange = () => {
       const currentTab = getInitialTab();
       setActiveTab(currentTab);
@@ -78,37 +73,20 @@ export default function App() {
         setEngineStatus("Client Engine Active");
       });
 
-    // Ensure healthy initial verification state from parser
-    try {
-      const initial = getInitialVerificationResult();
-      setActiveResult(initial);
-    } catch {
-      // Graceful fallback
-    }
-
-    // Load history from localStorage
+    // Load existing history from localStorage
     try {
       const savedHistory = localStorage.getItem(HISTORY_KEY);
       if (savedHistory) {
         const parsedHist = JSON.parse(savedHistory);
-        if (Array.isArray(parsedHist) && parsedHist.length > 0) {
+        if (Array.isArray(parsedHist)) {
           setHistory(parsedHist);
-        } else {
-          // Initialize history with initial parsed demo
-          const initial = getInitialVerificationResult();
-          setHistory([initial]);
-          localStorage.setItem(HISTORY_KEY, JSON.stringify([initial]));
         }
-      } else {
-        const initial = getInitialVerificationResult();
-        setHistory([initial]);
-        localStorage.setItem(HISTORY_KEY, JSON.stringify([initial]));
       }
     } catch {
       // Graceful fallback
     }
 
-    // Keyboard Shortcuts
+    // Keyboard Shortcuts (Cmd+N / Ctrl+N to clear input and focus workspace)
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
@@ -126,15 +104,22 @@ export default function App() {
 
   // 4. Start Verification Pipeline & Automatic Transition to Dashboard
   const handleStartVerification = async (payload: VerificationRequest) => {
+    if (!payload.text || !payload.text.trim()) return;
+
     setIsProcessing(true);
     setError(null);
+    setText(payload.text);
+    if (payload.model) {
+      setModel(payload.model as AiModel);
+    }
 
     try {
+      // Primary dispatch to FastAPI backend (queries OpenAlex, PubMed, ArXiv, DuckDuckGo, Wikipedia)
       const data = await verifyContent(payload);
       setActiveResult(data);
       setIsProcessing(false);
 
-      // Persist to localStorage
+      // Persist active scan
       try {
         localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(data));
       } catch {}
@@ -151,11 +136,11 @@ export default function App() {
         return updated;
       });
 
-      // Automatically switch view to Dashboard upon completion!
+      // Automatically switch to Dashboard view to display results immediately
       handleNavigate("dashboard");
     } catch (err: any) {
       setIsProcessing(false);
-      // If network fails, run fresh client parser
+      // Resilient client-side multi-source analysis fallback
       try {
         const fallbackData = parseTextToVerification(payload.text, payload.model || model);
         setActiveResult(fallbackData);
@@ -165,47 +150,13 @@ export default function App() {
       } catch {
         setError(
           err.message ||
-            "Failed to verify content across consensus sources. Please check backend connection and retry."
+            "Unable to complete multi-source verification. Please ensure backend is running."
         );
       }
     }
   };
 
-  // 5. Preset Selection: Immediately parses and populates fresh claims for the loaded demo text
-  const handleSelectPreset = (presetText: string, presetModel?: AiModel) => {
-    setText(presetText);
-    const chosenModel = presetModel || model;
-    if (presetModel) {
-      setModel(presetModel);
-    } else {
-      const matched = PRESET_OPTIONS.find((p) => p.text === presetText);
-      if (matched) {
-        setModel(matched.model);
-      }
-    }
-
-    // Accurately parse and populate the dashboard with fresh claims for this demo text!
-    try {
-      const freshParsed = parseTextToVerification(presetText, chosenModel);
-      setActiveResult(freshParsed);
-      localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(freshParsed));
-
-      setHistory((prev) => {
-        const updated = [
-          freshParsed,
-          ...prev.filter((p) => p.verification_id !== freshParsed.verification_id),
-        ].slice(0, 50);
-        try {
-          localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
-        } catch {}
-        return updated;
-      });
-    } catch {
-      // Fallback
-    }
-  };
-
-  // 6. Select Historical Audit
+  // 5. Select Historical Audit
   const handleSelectAudit = async (item: VerificationResponse | VerificationHistoryItem) => {
     if ("claims" in item && Array.isArray(item.claims) && item.claims.length > 0) {
       setActiveResult(item as VerificationResponse);
@@ -222,16 +173,17 @@ export default function App() {
         } catch {}
         handleNavigate("dashboard");
       } catch {
-        // Parse from snippet if available
-        const snippet = "snippet" in item ? item.snippet : DEFAULT_DEMO_TEXT;
-        const fallback = parseTextToVerification(snippet, item.model || "chatgpt");
-        setActiveResult(fallback);
+        const snippet = "snippet" in item ? item.snippet : "";
+        if (snippet) {
+          const fallback = parseTextToVerification(snippet, item.model || "chatgpt");
+          setActiveResult(fallback);
+        }
         handleNavigate("dashboard");
       }
     }
   };
 
-  // 7. Delete Single Historical Audit
+  // 6. Delete Single Historical Audit
   const handleDeleteAudit = (id: string) => {
     setHistory((prev) => {
       const updated = prev.filter((p) => p.verification_id !== id);
@@ -242,22 +194,20 @@ export default function App() {
     });
 
     if (activeResult?.verification_id === id) {
-      const nextResult = getInitialVerificationResult();
-      setActiveResult(nextResult);
+      setActiveResult(null);
       try {
-        localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(nextResult));
+        localStorage.removeItem(LAST_RESULT_KEY);
       } catch {}
     }
   };
 
-  // 8. Clear All History (Resets gracefully to initial benchmark without skeleton bones)
+  // 7. Clear All History
   const handleClearAllHistory = () => {
-    const initial = parseTextToVerification(DEFAULT_DEMO_TEXT, "chatgpt");
     setHistory([]);
-    setActiveResult(initial);
+    setActiveResult(null);
     try {
       localStorage.removeItem(HISTORY_KEY);
-      localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(initial));
+      localStorage.removeItem(LAST_RESULT_KEY);
     } catch {}
   };
 
@@ -269,10 +219,6 @@ export default function App() {
         onNavigate={handleNavigate}
         engineStatus={engineStatus}
         historyCount={history.length}
-        onSelectPreset={(demoText) => {
-          handleSelectPreset(demoText);
-          handleNavigate("dashboard");
-        }}
       />
 
       {/* Distinct View Stage (Strictly NO landing page scrolling) */}
@@ -281,7 +227,6 @@ export default function App() {
         {activeTab === "home" && (
           <HomeCoverView
             onNavigate={handleNavigate}
-            onSelectPreset={handleSelectPreset}
             onStartVerification={handleStartVerification}
             hasActiveResult={!!activeResult}
             historyCount={history.length}
@@ -294,10 +239,10 @@ export default function App() {
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 font-sans">
-                  Analysis Input Console
+                  Statement Verification Workspace
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-600 mt-1">
-                  Submit AI output to decompose claims, query ground-truth consensus, and calculate factual certainty.
+                  Paste any text to extract atomic claims and verify them against multiple authoritative sources (OpenAlex, PubMed, ArXiv, DuckDuckGo, Wikipedia).
                 </p>
               </div>
 
@@ -322,7 +267,6 @@ export default function App() {
               setText={setText}
               model={model}
               setModel={setModel}
-              onSelectPreset={handleSelectPreset}
             />
           </div>
         )}
@@ -333,30 +277,31 @@ export default function App() {
             {activeResult ? (
               <LightResults
                 result={activeResult}
-                onVerifyAgain={() => handleNavigate("workspace")}
+                onVerifyAgain={() => {
+                  setText("");
+                  handleNavigate("workspace");
+                }}
               />
             ) : (
               <div className="glass-card-light rounded-3xl p-10 sm:p-16 text-center space-y-6 max-w-xl mx-auto border border-slate-200 shadow-sm mt-8">
                 <div className="w-16 h-16 rounded-2xl bg-slate-900 text-white flex items-center justify-center mx-auto shadow-md">
-                  <BarChart3 size={32} />
+                  <Terminal size={30} />
                 </div>
                 <div className="space-y-2">
                   <h3 className="text-xl font-extrabold text-slate-900 font-sans">
-                    No Active Verification Report
+                    No Statements Analyzed Yet
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-600 leading-relaxed max-w-md mx-auto">
-                    Load our physics benchmark to inspect factual confidence scores and highlighted claims.
+                    Paste any text, AI response, or scientific statement in the workspace to launch a thorough multi-source audit across OpenAlex, PubMed, ArXiv, DuckDuckGo, and Wikipedia.
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                <div className="pt-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      handleSelectPreset(DEFAULT_DEMO_TEXT, "chatgpt");
-                    }}
-                    className="btn-pill-dark px-6 py-2.5 text-xs font-semibold flex items-center gap-2 shadow-sm"
+                    onClick={() => handleNavigate("workspace")}
+                    className="btn-pill-dark px-6 py-2.5 text-xs font-semibold inline-flex items-center gap-2 shadow-sm"
                   >
-                    <span>Load Fresh Benchmark</span>
+                    <span>Paste Statement in Workspace</span>
                     <ArrowRight size={14} />
                   </button>
                 </div>
@@ -383,12 +328,12 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-900">HalluciCheck v2.0</span>
             <span>·</span>
-            <span>AI Hallucination Verification</span>
+            <span>Multi-Source AI Hallucination Verification</span>
           </div>
 
           <div className="flex items-center gap-4">
-            <span className="text-emerald-700 font-semibold">● Live Multi-Source Quorum</span>
-            <span>Wikipedia REST · CrossRef DOI · DuckDuckGo</span>
+            <span className="text-emerald-700 font-semibold">● Multi-Source Quorum</span>
+            <span>OpenAlex · PubMed · ArXiv · DuckDuckGo · Wikipedia · CrossRef</span>
           </div>
         </div>
       </footer>

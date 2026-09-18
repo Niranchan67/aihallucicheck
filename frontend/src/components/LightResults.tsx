@@ -27,7 +27,7 @@ interface LightResultsProps {
 
 export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
   const [copied, setCopied] = useState(false);
-  const [selectedClaimIndex, setSelectedClaimIndex] = useState<number | null>(null);
+  const [selectedClaimIndex, setSelectedClaimIndex] = useState<number | null>(0);
   const [activeTab, setActiveTab] = useState<"text" | "claims" | "citations">("text");
 
   const claims = result.claims || [];
@@ -604,17 +604,35 @@ export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
                       {cl.reasoning || "Neutral cross-examination corroborated against open web records."}
                     </p>
 
-                    {cl.source_url && (
-                      <a
-                        href={cl.source_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-700 hover:text-slate-950 underline shrink-0"
-                      >
-                        <span>{cl.source || "Source"}</span>
-                        <ExternalLink size={10} />
-                      </a>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-[10px] font-mono text-slate-400">Sources:</span>
+                      {cl.sources && cl.sources.length > 0 ? (
+                        cl.sources.map((s, si) => (
+                          <a
+                            key={si}
+                            href={s.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-700 hover:text-slate-950 bg-slate-50 hover:bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 transition-colors"
+                          >
+                            <span>{s.name}</span>
+                            <ExternalLink size={10} />
+                          </a>
+                        ))
+                      ) : cl.source_url ? (
+                        <a
+                          href={cl.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-700 hover:text-slate-950 bg-slate-50 hover:bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 transition-colors"
+                        >
+                          <span>{cl.source || "Source"}</span>
+                          <ExternalLink size={10} />
+                        </a>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 font-mono">Consensus Index</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}

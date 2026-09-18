@@ -1,69 +1,57 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Shield,
   ArrowRight,
-  Sparkles,
   BarChart3,
   History,
   FileText,
   Search,
   BookOpen,
   Cpu,
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
-  ExternalLink,
   ChevronRight,
   Layers,
+  Terminal,
+  Sparkles,
 } from "lucide-react";
 import type { AppTab, AiModel, VerificationRequest } from "../types";
 
 interface HomeCoverViewProps {
   onNavigate: (tab: AppTab) => void;
-  onSelectPreset: (text: string, model: AiModel) => void;
   onStartVerification: (req: VerificationRequest) => void;
   hasActiveResult: boolean;
   historyCount: number;
 }
 
-export const DIAGNOSTIC_PRESETS = [
-  {
-    title: "Science & Physics Violation",
-    badge: "Physics",
-    model: "chatgpt" as AiModel,
-    desc: "Checks specific heat of water vs standard model faster-than-light violation.",
-    text: "The specific heat capacity of water is 4.184 J/g C. Quantum entanglement allows for instantaneous faster-than-light communication across interstellar distances.",
-  },
-  {
-    title: "History & Chronology Check",
-    badge: "Chronology",
-    model: "claude" as AiModel,
-    desc: "Validates historical milestones, construction dates, and geographical capitals.",
-    text: "Paris is the capital and most populous city of France. The Eiffel Tower was constructed from 1887 to 1889 as the centerpiece of the 1889 World Fair.",
-  },
-  {
-    title: "Academic Citation & DOI Audit",
-    badge: "Citation / DOI",
-    model: "gemini" as AiModel,
-    desc: "Verifies scholarly citations and paper authorship against CrossRef registries.",
-    text: "Transformer neural networks replace recurrent loops with self-attention mechanisms. Vaswani, A. (2017). Attention Is All You Need. NeurIPS.",
-  },
-  {
-    title: "Severe Hallucination Trap",
-    badge: "High Risk",
-    model: "other" as AiModel,
-    desc: "Tests fabricated historical dates and impossible space exploration claims.",
-    text: "Python was invented in 2024 by Elon Musk. In 1985, NASA astronauts landed directly on the solid diamond core of Jupiter during Apollo 18.",
-  },
+const MODEL_OPTIONS: { id: AiModel; name: string }[] = [
+  { id: "chatgpt", name: "GPT-4o" },
+  { id: "claude", name: "Claude 3.5" },
+  { id: "gemini", name: "Gemini 1.5" },
+  { id: "llama", name: "Llama 3.3" },
+  { id: "other", name: "Other" },
 ];
 
 export function HomeCoverView({
   onNavigate,
-  onSelectPreset,
   onStartVerification,
   hasActiveResult,
   historyCount,
 }: HomeCoverViewProps) {
+  const [statementText, setStatementText] = useState("");
+  const [selectedModel, setSelectedModel] = useState<AiModel>("chatgpt");
+
+  const handleQuickSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!statementText.trim()) return;
+
+    onStartVerification({
+      text: statementText.trim(),
+      model: selectedModel,
+      verify_claims: true,
+      verify_citations: true,
+      verify_statistics: true,
+    });
+  };
+
   return (
     <div className="max-w-6xl w-full mx-auto px-4 sm:px-8 py-8 sm:py-12 space-y-12 animate-fade-in">
       {/* 1. Hero Branding & Overview Card */}
@@ -89,10 +77,9 @@ export function HomeCoverView({
 
           {/* Professional Overview */}
           <p className="text-sm sm:text-base text-slate-600 leading-relaxed max-w-2xl font-sans">
-            Autonomous multi-source verification workspace designed to eliminate AI confabulation.
-            HalluciCheck decomposes complex LLM generations into atomic claims, cross-references
-            assertions against independent open-knowledge authorities (Wikipedia REST, DuckDuckGo Live Search, CrossRef DOIs),
-            and computes calibrated certainty tiers with deep diagnostic rationale.
+            Paste any statement or AI-generated output to thoroughly decompose assertions, cross-reference
+            multiple authoritative knowledge registries (OpenAlex, PubMed, ArXiv, DuckDuckGo Web Search, CrossRef, and Wikipedia),
+            and inspect calibrated factual certainty with exact sentence highlights.
           </p>
 
           {/* Quick CTA row */}
@@ -102,7 +89,7 @@ export function HomeCoverView({
               onClick={() => onNavigate("workspace")}
               className="btn-pill-dark px-6 py-3 text-sm font-semibold flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
             >
-              <span>Start Text Verification</span>
+              <span>Open Verification Workspace</span>
               <ArrowRight size={16} />
             </button>
 
@@ -132,13 +119,111 @@ export function HomeCoverView({
         </div>
       </div>
 
-      {/* 2. Quick Action Navigation Grid */}
+      {/* 2. Direct Statement Analysis Console (Paste & Analyze) */}
+      <div className="glass-card-light rounded-2xl p-6 sm:p-8 border border-slate-200/90 shadow-2xs space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center">
+              <Terminal size={16} />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 font-sans">
+                Analyze Any Statement Thoroughly
+              </h2>
+              <p className="text-xs text-slate-500 font-sans">
+                Paste any text to query independent evidence across OpenAlex, PubMed, ArXiv, DuckDuckGo &amp; Wikipedia
+              </p>
+            </div>
+          </div>
+
+          {/* Model Selector Pills */}
+          <div className="flex items-center gap-1.5 p-1 rounded-full bg-slate-100 border border-slate-200 text-xs">
+            <span className="text-[10px] font-mono text-slate-500 px-2 font-bold">MODEL:</span>
+            {MODEL_OPTIONS.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setSelectedModel(m.id)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                  selectedModel === m.id
+                    ? "bg-slate-900 text-white shadow-2xs"
+                    : "text-slate-600 hover:text-slate-950 hover:bg-white"
+                }`}
+              >
+                {m.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <form onSubmit={handleQuickSubmit} className="space-y-4">
+          <div className="relative rounded-2xl border border-slate-200 bg-white focus-within:border-slate-400 focus-within:ring-2 focus-within:ring-slate-900/5 transition-all shadow-2xs">
+            <textarea
+              rows={4}
+              value={statementText}
+              onChange={(e) => setStatementText(e.target.value)}
+              placeholder="Paste any statement, raw AI output, scientific assertion, or research text to analyze thoroughly against legit ground-truth sources…"
+              className="w-full bg-transparent p-4 sm:p-5 text-sm sm:text-base text-slate-900 placeholder-slate-400 focus:outline-none font-sans leading-relaxed resize-y min-h-[120px]"
+            />
+
+            <div className="border-t border-slate-100 px-4 py-2 bg-slate-50/60 rounded-b-2xl flex items-center justify-between text-xs">
+              <div className="text-[11px] font-mono text-slate-500">
+                <span>{statementText.trim() ? statementText.trim().split(/\s+/).length : 0} words</span>
+                <span className="mx-2">·</span>
+                <span>{statementText.length} characters</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {statementText && (
+                  <button
+                    type="button"
+                    onClick={() => setStatementText("")}
+                    className="text-slate-500 hover:text-rose-600 text-xs font-medium cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const clip = await navigator.clipboard.readText();
+                      if (clip) setStatementText(clip);
+                    } catch {}
+                  }}
+                  className="text-xs text-slate-700 hover:text-slate-950 font-semibold bg-white border border-slate-200 px-2.5 py-0.5 rounded-md hover:bg-slate-100 transition-colors cursor-pointer shadow-2xs"
+                >
+                  Paste Clipboard
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+            <div className="flex items-center gap-2 text-xs font-mono text-slate-500">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+              <span>Multi-source consensus ready</span>
+            </div>
+
+            <button
+              type="submit"
+              disabled={!statementText.trim()}
+              className="btn-pill-dark px-6 py-2.5 text-xs font-semibold flex items-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <span>Thoroughly Analyze Statement</span>
+              <ArrowRight size={14} />
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* 3. Navigation Grid */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-extrabold text-slate-900 tracking-tight font-sans uppercase">
             Workspace Modules
           </h2>
-          <span className="text-xs text-slate-500 font-mono">Instant view navigation</span>
+          <span className="text-xs text-slate-500 font-mono">Direct application access</span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -149,11 +234,11 @@ export function HomeCoverView({
                 <FileText size={20} />
               </div>
               <h3 className="text-base font-bold text-slate-900 font-sans group-hover:text-slate-800">
-                Start Text Verification
+                Verification Workspace
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                Paste any model response from ChatGPT, Claude, Gemini, or Llama. Configure claim decomposition,
-                citation audit, and statistical checks before launching verification.
+                Full-featured analysis input console with configurable claim extraction, citation audits,
+                and statistical verification controls.
               </p>
             </div>
             <div className="pt-5 mt-4 border-t border-slate-100">
@@ -162,7 +247,7 @@ export function HomeCoverView({
                 onClick={() => onNavigate("workspace")}
                 className="w-full btn-pill-dark py-2.5 text-xs font-semibold flex items-center justify-center gap-2"
               >
-                <span>Launch Analysis Console</span>
+                <span>Open Analysis Workspace</span>
                 <ArrowRight size={14} />
               </button>
             </div>
@@ -175,11 +260,11 @@ export function HomeCoverView({
                 <BarChart3 size={20} />
               </div>
               <h3 className="text-base font-bold text-slate-900 font-sans group-hover:text-slate-800">
-                View Live Dashboard
+                Results Dashboard
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
                 Inspect the Overall Certainty Ring, 4 factual KPI metrics, sentence-level highlighted text viewer,
-                and CrossRef DOI validation reports.
+                and legitimate cross-source references.
               </p>
             </div>
             <div className="pt-5 mt-4 border-t border-slate-100">
@@ -204,7 +289,7 @@ export function HomeCoverView({
                 Audit History &amp; Logs
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                Review past verification sessions saved via the localStorage data bridge. Filter by origin model
+                Review past verification sessions saved across your browser sessions. Filter by origin model
                 or keyword, and export comprehensive JSON findings.
               </p>
             </div>
@@ -222,132 +307,62 @@ export function HomeCoverView({
         </div>
       </div>
 
-      {/* 3. Diagnostic Test Presets */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sparkles size={16} className="text-slate-700" />
-            <h2 className="text-base font-extrabold text-slate-900 tracking-tight font-sans uppercase">
-              One-Click Diagnostic Presets
-            </h2>
-          </div>
-          <span className="text-xs text-slate-500 font-mono">Immediate benchmark samples</span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {DIAGNOSTIC_PRESETS.map((preset, idx) => (
-            <div
-              key={idx}
-              className="glass-card-light rounded-xl p-5 border border-slate-200/80 hover:border-slate-400/80 transition-all flex flex-col justify-between group shadow-2xs"
-            >
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200">
-                    {preset.badge}
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-400 uppercase">
-                    {preset.model}
-                  </span>
-                </div>
-                <h3 className="text-xs font-bold text-slate-900 group-hover:text-slate-700 transition-colors">
-                  {preset.title}
-                </h3>
-                <p className="text-[11px] text-slate-500 leading-snug line-clamp-2">
-                  {preset.desc}
-                </p>
-              </div>
-
-              <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSelectPreset(preset.text, preset.model);
-                    onNavigate("workspace");
-                  }}
-                  className="text-xs font-semibold text-slate-700 hover:text-slate-950 flex items-center gap-1 cursor-pointer"
-                >
-                  <span>Load into Console</span>
-                  <ArrowRight size={12} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    onStartVerification({
-                      text: preset.text,
-                      model: preset.model,
-                      verify_claims: true,
-                      verify_citations: true,
-                      verify_statistics: true,
-                    });
-                  }}
-                  className="btn-pill-dark text-[11px] px-2.5 py-1 font-semibold"
-                  title="Run verification immediately"
-                >
-                  Audit
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* 4. Multi-Source Ground Truth Engine Strip */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Layers size={16} className="text-slate-700" />
           <h2 className="text-base font-extrabold text-slate-900 tracking-tight font-sans uppercase">
-            Multi-Source Consensus Architecture
+            Authoritative Consensus Quorum (Beyond Wikipedia)
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="glass-card-light rounded-2xl p-5 border border-slate-200/80 shadow-2xs space-y-2">
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center justify-center">
+              <BookOpen size={16} />
+            </div>
+            <h3 className="text-xs font-bold text-slate-900 font-mono uppercase tracking-wider">
+              OpenAlex &amp; IEEE / Nature
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed font-sans">
+              Queries 250M+ scholarly works from Nature, IEEE, Springer, and ACM to audit academic assertions.
+            </p>
+          </div>
+
           <div className="glass-card-light rounded-2xl p-5 border border-slate-200/80 shadow-2xs space-y-2">
             <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center justify-center">
               <Search size={16} />
             </div>
             <h3 className="text-xs font-bold text-slate-900 font-mono uppercase tracking-wider">
-              01 · Wikipedia REST &amp; Open Web
+              Europe PMC / PubMed
             </h3>
             <p className="text-xs text-slate-600 leading-relaxed font-sans">
-              Queries encyclopedia abstracts and DuckDuckGo Live Search to retrieve corroborating evidence
-              without model confirmation bias.
+              Cross-checks biomedical and life-science claims against PubMed Central and NIH publications.
             </p>
-            <div className="text-[10px] font-mono text-emerald-700 font-semibold pt-1">
-              Active live consensus checking
-            </div>
           </div>
 
           <div className="glass-card-light rounded-2xl p-5 border border-slate-200/80 shadow-2xs space-y-2">
             <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 flex items-center justify-center">
-              <BookOpen size={16} />
-            </div>
-            <h3 className="text-xs font-bold text-slate-900 font-mono uppercase tracking-wider">
-              02 · CrossRef DOI &amp; Paper Audit
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed font-sans">
-              Detects phantom citations, fabricated journal references, and invalid DOIs by querying the
-              official CrossRef scholarly metadata registry.
-            </p>
-            <div className="text-[10px] font-mono text-blue-700 font-semibold pt-1">
-              CrossRef REST API connected
-            </div>
-          </div>
-
-          <div className="glass-card-light rounded-2xl p-5 border border-slate-200/80 shadow-2xs space-y-2">
-            <div className="w-8 h-8 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 flex items-center justify-center">
               <Cpu size={16} />
             </div>
             <h3 className="text-xs font-bold text-slate-900 font-mono uppercase tracking-wider">
-              03 · Calibrated Certainty Engine
+              ArXiv Preprints &amp; CS
             </h3>
             <p className="text-xs text-slate-600 leading-relaxed font-sans">
-              Calculates calibrated 0–100% certainty scores and categorizes risk into High Certainty,
-              Moderate Risk, or High Hallucination Risk tiers.
+              Verifies computer science, AI, physics, and mathematical claims against Cornell University preprints.
             </p>
-            <div className="text-[10px] font-mono text-purple-700 font-semibold pt-1">
-              Deterministic mathematical scoring
+          </div>
+
+          <div className="glass-card-light rounded-2xl p-5 border border-slate-200/80 shadow-2xs space-y-2">
+            <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center">
+              <Search size={16} />
             </div>
+            <h3 className="text-xs font-bold text-slate-900 font-mono uppercase tracking-wider">
+              DuckDuckGo Live Search
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed font-sans">
+              Pulls live open web index results across verified domains to corroborate contemporary facts.
+            </p>
           </div>
         </div>
       </div>

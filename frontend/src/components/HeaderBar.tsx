@@ -16,7 +16,6 @@ interface HeaderBarProps {
   onNavigate: (tab: AppTab) => void;
   engineStatus: string;
   historyCount: number;
-  onSelectPreset?: (text: string) => void;
 }
 
 export function HeaderBar({
@@ -24,7 +23,6 @@ export function HeaderBar({
   onNavigate,
   engineStatus,
   historyCount,
-  onSelectPreset,
 }: HeaderBarProps) {
   const navTabs: { id: AppTab; label: string; icon: LucideIcon }[] = [
     { id: "home", label: "Home", icon: LayoutGrid },
@@ -100,22 +98,6 @@ export function HeaderBar({
 
         {/* Right Navigation & Status Pill */}
         <div className="flex items-center gap-2.5 sm:gap-3">
-          {/* Quick Demo Action */}
-          {onSelectPreset && (
-            <button
-              type="button"
-              onClick={() =>
-                onSelectPreset(
-                  "The specific heat capacity of water is 4.184 J/g C. Quantum entanglement allows for instantaneous faster-than-light communication across interstellar distances."
-                )
-              }
-              className="hidden lg:inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
-              title="Load and parse fresh Physics benchmark"
-            >
-              <Sparkles size={13} className="text-slate-500" />
-              <span>Physics Demo</span>
-            </button>
-          )}
 
           {/* Professional Status Pill */}
           <div className="hidden md:inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50/90 px-3 py-1 text-xs font-medium text-emerald-800 shadow-2xs">

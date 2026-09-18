@@ -25,32 +25,6 @@ interface LightConsoleProps {
   onSelectPreset?: (text: string, model: AiModel) => void;
 }
 
-export const PRESET_OPTIONS = [
-  {
-    label: "Physics & Entanglement",
-    badge: "Physics",
-    model: "chatgpt" as AiModel,
-    text: "The specific heat capacity of water is 4.184 J/g C. Quantum entanglement allows for instantaneous faster-than-light communication across interstellar distances.",
-  },
-  {
-    label: "Historical Timeline",
-    badge: "History",
-    model: "claude" as AiModel,
-    text: "Paris is the capital and most populous city of France. The Eiffel Tower was constructed from 1887 to 1889 as the centerpiece of the 1889 World Fair.",
-  },
-  {
-    label: "Attention Paper Citation",
-    badge: "Citation",
-    model: "gemini" as AiModel,
-    text: "Transformer neural networks replace recurrent loops with self-attention mechanisms. Vaswani, A. (2017). Attention Is All You Need. NeurIPS.",
-  },
-  {
-    label: "Fabrication Benchmark",
-    badge: "High Risk",
-    model: "other" as AiModel,
-    text: "Python was invented in 2024 by Elon Musk. In 1985, NASA astronauts landed directly on the solid diamond core of Jupiter during Apollo 18.",
-  },
-];
 
 const MODEL_LIST: { id: AiModel; name: string }[] = [
   { id: "chatgpt", name: "OpenAI GPT-4o" },
@@ -133,36 +107,20 @@ export function LightConsole({
         <div className="space-y-2">
           <div className="relative rounded-2xl border border-slate-200/90 bg-white focus-within:border-slate-400 focus-within:ring-2 focus-within:ring-slate-900/5 transition-all shadow-2xs">
             <textarea
-              rows={5}
+              rows={6}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Paste raw AI output, scientific claims, or research summaries to audit against ground truth…"
+              placeholder="Paste any statement, raw AI output, scientific assertion, or research text to analyze thoroughly against legit ground-truth sources (OpenAlex, PubMed, ArXiv, DuckDuckGo, Wikipedia)…"
               disabled={isProcessing}
               className="w-full bg-transparent p-4 sm:p-5 text-sm sm:text-base text-slate-900 placeholder-slate-400 focus:outline-none font-sans leading-relaxed resize-y min-h-[140px]"
             />
 
             {/* Bottom Inner Toolbar */}
             <div className="border-t border-slate-100 px-4 py-2.5 bg-slate-50/70 rounded-b-2xl flex flex-wrap items-center justify-between gap-2 text-xs">
-              {/* Presets Chips */}
-              <div className="flex items-center gap-1.5 overflow-x-auto text-[11px]">
-                <span className="font-semibold text-slate-500 shrink-0 font-mono">Presets:</span>
-                {PRESET_OPTIONS.map((p, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => {
-                      setText(p.text);
-                      setModel(p.model);
-                      if (onSelectPreset) {
-                        onSelectPreset(p.text, p.model);
-                      }
-                    }}
-                    className="px-2.5 py-1 rounded-full bg-white text-slate-700 border border-slate-200 hover:border-slate-400 hover:text-slate-900 transition-colors cursor-pointer shrink-0 font-medium"
-                  >
-                    {p.badge}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+                <span>Ready for thorough multi-source analysis</span>
               </div>
 
               {/* Counters & Actions */}
@@ -187,7 +145,7 @@ export function LightConsole({
                       if (clip) setText(clip);
                     } catch {}
                   }}
-                  className="text-slate-600 hover:text-slate-950 transition-colors font-sans cursor-pointer font-medium"
+                  className="text-slate-700 hover:text-slate-950 font-semibold bg-white border border-slate-200 px-2.5 py-0.5 rounded-md hover:bg-slate-100 transition-colors font-sans cursor-pointer shadow-2xs"
                 >
                   Paste
                 </button>
