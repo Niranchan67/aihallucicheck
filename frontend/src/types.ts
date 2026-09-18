@@ -7,6 +7,7 @@ export type CitationStatus = "valid" | "fabricated" | "unverified";
 export type AiModel = "chatgpt" | "claude" | "gemini" | "llama" | "other";
 
 export type WorkspaceView = "hub" | "console" | "results" | "history";
+export type AppTab = "home" | "workspace" | "dashboard" | "history";
 
 
 export interface VerificationRequest {
