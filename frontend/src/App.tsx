@@ -72,11 +72,14 @@ export default function App() {
       window.location.hash = "hub";
     }
 
-    // Global keyboard shortcut: Cmd+N / Ctrl+N for new audit
+    // Global keyboard shortcuts: Cmd+N / Ctrl+N for new audit, Escape to close overlays
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
         handleNewAudit();
+      }
+      if (e.key === "Escape") {
+        setIsMobileSidebarOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);

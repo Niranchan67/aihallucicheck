@@ -511,11 +511,19 @@ export function ResultsDashboard({
             return (
               <span
                 key={cl.id || idx}
+                role="button"
+                tabIndex={0}
                 onClick={() => setSelectedClaimIndex(isSelected ? null : idx)}
-                className={`inline-block px-1.5 py-0.5 my-1 rounded cursor-pointer transition-all ${highlightClass} ${
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSelectedClaimIndex(isSelected ? null : idx);
+                  }
+                }}
+                className={`inline-block px-1.5 py-0.5 my-1 rounded cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${highlightClass} ${
                   isSelected ? "ring-2 ring-cyan-400 scale-[1.01] shadow-lg" : ""
                 }`}
-                title={`Click to inspect claim #${idx + 1} (${cl.status.toUpperCase()} · ${Math.round(cl.confidence)}%)`}
+                title={`Click or press Enter to inspect claim #${idx + 1} (${cl.status.toUpperCase()} · ${Math.round(cl.confidence)}%)`}
               >
                 {cl.text}
               </span>
