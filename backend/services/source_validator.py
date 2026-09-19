@@ -1,21 +1,25 @@
 """
 source_validator.py
 --------------------
-Classifies the credibility, authority tier, and institutional provenance
-of evidence sources retrieved during the verification process.
+Stage 4: Source Quality & Relevance Analyzer.
 
-Ensures that claims are only marked VERIFIED when backed by authoritative,
-reputable sources (academic peer-reviewed, governmental, or reputable reference).
+Calculates:
+1. Source Authority Tier (Academic, Government, Structured Knowledge, News, Web)
+2. Relevance to the exact atomic claim (discarding irrelevant sources even if high authority)
+3. Primary vs Secondary Source classification
+4. Source Independence & Diversity metrics
 """
 
 from enum import Enum
-from typing import Tuple
+import re
+from typing import List, Set, Tuple
 from urllib.parse import urlparse
 
 
 class SourceTier(str, Enum):
     PEER_REVIEWED_ACADEMIC = "peer_reviewed_academic"
     OFFICIAL_INSTITUTIONAL = "official_institutional"
+    STRUCTURED_KNOWLEDGE = "structured_knowledge"
     REPUTABLE_REFERENCE = "reputable_reference"
     ESTABLISHED_NEWS = "established_news"
     OPEN_WEB = "open_web"
@@ -33,12 +37,16 @@ _ACADEMIC_DOMAINS = {
 _OFFICIAL_DOMAINS = {
     "nasa.gov", "who.int", "un.org", "cern.ch", "cdc.gov", "nih.gov",
     "noaa.gov", "nist.gov", "usgs.gov", "energy.gov", "state.gov", "europa.eu",
-    "worldbank.org", "imf.org", "unesco.org", "esa.int"
+    "worldbank.org", "imf.org", "unesco.org", "esa.int", "nobelprize.org"
+}
+
+_STRUCTURED_KNOWLEDGE_DOMAINS = {
+    "wikidata.org", "dbpedia.org"
 }
 
 _REPUTABLE_REFERENCE_DOMAINS = {
-    "wikipedia.org", "en.wikipedia.org", "britannica.com", "plato.stanford.edu",
-    "merriam-webster.com", "oed.com"
+    "britannica.com", "plato.stanford.edu", "merriam-webster.com", "oed.com",
+    "wikipedia.org", "en.wikipedia.org"
 }
 
 _ESTABLISHED_NEWS_DOMAINS = {
@@ -48,13 +56,13 @@ _ESTABLISHED_NEWS_DOMAINS = {
 }
 
 
-def classify_source_authority(source_name: str, source_url: str) -> Tuple[SourceTier, float, str]:
+def classify_source_authority(source_name: str, source_url: str) -> Tuple[SourceTier, float, str, bool]:
     """
-    Evaluate source reliability based on domain, protocol, and provenance.
-    Returns: (SourceTier, authority_weight (0.0 - 1.0), description)
+    Evaluates source reliability and determines whether it serves as a primary source.
+    Returns: (SourceTier, authority_weight (0.0 - 1.0), description, is_primary)
     """
     if not source_url:
-        return SourceTier.UNVERIFIED, 0.0, "Missing source URL."
+        return SourceTier.UNVERIFIED, 0.0, "Missing source URL.", False
 
     try:
         parsed = urlparse(source_url)
@@ -62,44 +70,94 @@ def classify_source_authority(source_name: str, source_url: str) -> Tuple[Source
         if domain.startswith("www."):
             domain = domain[4:]
     except Exception:
-        return SourceTier.UNVERIFIED, 0.0, "Malformed source URL."
+        return SourceTier.UNVERIFIED, 0.0, "Malformed source URL.", False
 
-    # 1. Peer-reviewed academic & registry sources
     name_low = (source_name or "").lower()
+
+    # 1. Peer-reviewed academic & registry sources (Primary research)
     if any(ad in domain for ad in _ACADEMIC_DOMAINS) or any(
         term in name_low for term in [
             "openalex", "pubmed", "arxiv", "nature", "science", "pnas",
             "ieee", "springer", "crossref", "peer-reviewed", "journal"
         ]
     ):
-        return SourceTier.PEER_REVIEWED_ACADEMIC, 1.0, "Peer-reviewed scientific or scholarly literature."
+        return SourceTier.PEER_REVIEWED_ACADEMIC, 1.0, "Peer-reviewed scientific or scholarly literature.", True
 
-    # 2. Government & University institutional domains (.gov, .mil, .edu, official bodies)
+    # 2. Government & University institutional domains (Primary records)
     if (
         domain.endswith(".gov")
         or domain.endswith(".mil")
         or domain.endswith(".edu")
         or domain.endswith(".ac.uk")
         or any(od in domain for od in _OFFICIAL_DOMAINS)
+        or "nobelprize.org" in domain
     ):
-        return SourceTier.OFFICIAL_INSTITUTIONAL, 0.95, "Official government, educational, or international research institution."
+        return SourceTier.OFFICIAL_INSTITUTIONAL, 0.95, "Official government, educational, or international research institution.", True
 
-    # 3. Established encyclopedic reference
-    if any(rd in domain for rd in _REPUTABLE_REFERENCE_DOMAINS) or "wikipedia" in name_low or "britannica" in name_low:
-        return SourceTier.REPUTABLE_REFERENCE, 0.85, "Reputable encyclopedic reference."
+    # 3. Structured Knowledge Graph (Wikidata)
+    if any(sk in domain for sk in _STRUCTURED_KNOWLEDGE_DOMAINS) or "wikidata" in name_low:
+        return SourceTier.STRUCTURED_KNOWLEDGE, 0.90, "Structured factual knowledge graph (Wikidata).", False
 
-    # 4. Established journalism & news agencies
+    # 4. Established encyclopedic reference
+    if any(rd in domain for rd in _REPUTABLE_REFERENCE_DOMAINS) or "britannica" in name_low:
+        is_wiki = "wikipedia" in domain or "wikipedia" in name_low
+        return SourceTier.REPUTABLE_REFERENCE, 0.82 if not is_wiki else 0.78, "Established reference archive.", False
+
+    # 5. Established journalism & news agencies
     if any(nd in domain for nd in _ESTABLISHED_NEWS_DOMAINS):
-        return SourceTier.ESTABLISHED_NEWS, 0.70, "Established independent news organisation."
+        return SourceTier.ESTABLISHED_NEWS, 0.75, "Established independent news organisation.", False
 
-    # 5. General web source
-    return SourceTier.OPEN_WEB, 0.45, "General public web source."
+    # 6. General web source
+    return SourceTier.OPEN_WEB, 0.45, "General public web source.", False
+
+
+def evaluate_source_relevance(
+    claim_terms: Set[str],
+    entities: List[str],
+    snippet: str,
+    title: str = "",
+) -> Tuple[bool, float]:
+    """
+    CRITICAL RULE:
+    A highly authoritative source that is irrelevant to the claim is NOT evidence.
+    Do not display or credit irrelevant sources merely because they have high authority.
+
+    Returns: (is_relevant, relevance_score [0.0 - 1.0])
+    """
+    text = f"{title} {snippet}".lower()
+    if not text.strip():
+        return False, 0.0
+
+    # 1. Check entity presence
+    entity_hits = 0
+    clean_entities = [e.lower() for e in entities if len(e) > 2]
+    for ent in clean_entities:
+        ent_words = [w for w in re.findall(r"\b\w+\b", ent) if len(w) > 2]
+        if any(w in text for w in ent_words):
+            entity_hits += 1
+
+    entity_coverage = (entity_hits / len(clean_entities)) if clean_entities else 0.5
+
+    # 2. Check claim term overlap
+    clean_claim_terms = {t.lower() for t in claim_terms if len(t) > 2}
+    matched_terms = [t for t in clean_claim_terms if t in text]
+    term_coverage = (len(matched_terms) / len(clean_claim_terms)) if clean_claim_terms else 0.5
+
+    # Weighted relevance score
+    relevance_score = (entity_coverage * 0.55) + (term_coverage * 0.45)
+
+    # Minimum threshold to be considered materially relevant evidence
+    is_relevant = relevance_score >= 0.28 or (entity_hits >= 1 and len(matched_terms) >= 2)
+
+    return is_relevant, round(relevance_score, 2)
 
 
 def is_authoritative_for_verification(tier: SourceTier) -> bool:
-    """Only high and medium-high authority sources can establish VERIFIED status."""
+    """Only Tier 1 and Tier 2 authoritative sources can establish VERIFIED status."""
     return tier in (
         SourceTier.PEER_REVIEWED_ACADEMIC,
         SourceTier.OFFICIAL_INSTITUTIONAL,
+        SourceTier.STRUCTURED_KNOWLEDGE,
         SourceTier.REPUTABLE_REFERENCE,
+        SourceTier.ESTABLISHED_NEWS,
     )

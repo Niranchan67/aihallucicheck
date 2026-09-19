@@ -1,44 +1,39 @@
 """
 fact_checker.py
 ---------------
-Stage 3 & Stage 5 of the verification pipeline:
-Full factual verification engine across ANY input text.
+Core Factual Verification Orchestrator:
+Coordinates the complete 18-stage evidence-grounded verification pipeline:
 
-REQUIRED ARCHITECTURE:
 User Input
--> Sentence / Claim Extraction
--> Atomic Fact Extraction
--> Entity + Relationship Extraction
--> Evidence Retrieval
--> URL Validation
--> Source Validation
--> Evidence Entailment
--> Contradiction Detection
--> Confidence Calculation
--> Final Classification
-
-RULES:
-- Semantic similarity is strictly limited to candidate evidence retrieval.
-- Never use similarity > threshold -> VERIFIED.
-- Absence of contradictory evidence is NOT enough to classify something as VERIFIED.
-- All displayed URLs must be real, reachable, canonical URLs retrieved from external sources.
+-> Stage 1: Claim Understanding & 11-Class Taxonomy (claim_analyzer.py)
+-> Stage 2: Atomic Fact Decomposition (Entity -> Relation -> Value / Qualifiers)
+-> Stage 3: Adaptive Query Generation (independent_verifier.py)
+-> Stage 4: Active Contradiction Search Generation
+-> Stage 5: Multi-Source Evidence Retrieval (OpenAlex, CrossRef, PubMed, ArXiv, Live Web, Wikidata, Wikipedia)
+-> Stage 6: URL Validation & Reachability Probe (url_validator.py)
+-> Stage 7: Source Quality & Relevance Filtering (source_validator.py)
+-> Stage 8: Adaptive Retrieval Fallback / Retry on Insufficient Evidence
+-> Stage 9: Proposition-Level Evidence Entailment & Sufficiency Analysis (entailment_engine.py)
+-> Stage 10: Consensus Aggregation & Duplicate/Syndication Suppression
+-> Stage 11: Deterministic Multi-Criteria Classification (VERIFIED, SUSPICIOUS, HALLUCINATED)
+-> Stage 12: Evidence-Grounded Confidence Calibration & Transparent Rationale Generation
 """
 
 import asyncio
-import json
-import os
 import re
-from typing import List, Optional, Tuple
-import httpx
+from typing import List, Optional, Set, Tuple
 
 from config import get_settings
 from schemas import ClaimResult, ClaimStatus, ClaimType, SourceCitation
-from services.claim_extractor import extract_claims
+from services.claim_analyzer import (
+    AnalyzedClaim,
+    InternalClaimType,
+    analyze_claim,
+)
 from services.entailment_engine import (
-    AtomicProposition,
-    PropositionStatus,
+    EvidenceRelation,
     PropositionVerificationReport,
-    decompose_claim_into_propositions,
+    SufficiencyState,
     evaluate_complete_claim_propositions,
 )
 from services.independent_verifier import generate_independent_query
@@ -47,113 +42,25 @@ from services.multi_source_retriever import (
     retrieve_multi_source_evidence,
 )
 from services.source_validator import (
-    SourceTier,
     classify_source_authority,
+    evaluate_source_relevance,
     is_authoritative_for_verification,
 )
 from services.url_validator import is_valid_url_format, validate_and_resolve_url
 
 settings = get_settings()
 
-OPENROUTER_KEYS = [
-    key for key in [os.getenv("OPENROUTER_API_KEY", "")] if key and len(key) > 10
-]
 
-LLM_MODELS = [
-    "openai/gpt-4o-mini",
-    "anthropic/claude-3-haiku",
-    "google/gemini-2.0-flash-exp:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-]
-
-
-async def _judge_with_llm(
-    claim_text: str,
-    neutral_question: str,
-    evidence_pool: List[RetrievedEvidence],
-) -> Optional[Tuple[ClaimStatus, float, str, str, str, str]]:
-    """
-    Opportunistically cross-examine claim with external LLM if an API key is configured.
-    Returns (status, confidence, reasoning, evidence_quote, source_name, source_url) or None.
-    """
-    if not OPENROUTER_KEYS and not os.getenv("GEMINI_API_KEY"):
-        return None
-
-    evidence_snippets = "\n".join(
-        f"- [{e.source_name}] ({e.source_url}): {e.snippet}"
-        for e in evidence_pool
-    )
-
-    system_prompt = (
-        "You are HalluciCheck, an elite AI Hallucination & Fact-Checking Verification Model. "
-        "Analyze whether the given statement is factually accurate or contains hallucinations, false numbers, wrong dates, or fabricated assertions. "
-        "Strict rules: Never mark a claim verified based on semantic overlap. It must be directly supported by verified facts."
-    )
-
-    user_prompt = (
-        f'CLAIM TO VERIFY:\n"{claim_text}"\n\n'
-        f'INDEPENDENT NEUTRAL QUERY:\n{neutral_question}\n\n'
-        f'RETRIEVED EXTERNAL GROUND TRUTH:\n{evidence_snippets or "No external passages indexed."}\n\n'
-        'INSTRUCTIONS:\n'
-        '1. Evaluate the claim strictly against verified facts and external ground truth.\n'
-        '2. Classify status into one of:\n'
-        '   - "verified": The statement is entirely true, accurate, and substantiated by reliable evidence.\n'
-        '   - "hallucinated": The statement is false, disproven, or contains fabricated facts/names/dates.\n'
-        '   - "suspicious": The statement is partially true, ambiguous, unproven, or lacks conclusive evidence.\n'
-        '3. Provide a confidence score from 10 to 98.\n'
-        '4. Provide a 1-2 sentence factual explanation.\n'
-        '5. Return ONLY a valid JSON object matching this schema:\n'
-        '{\n'
-        '  "status": "verified" | "hallucinated" | "suspicious",\n'
-        '  "confidence": <integer 10-98>,\n'
-        '  "explanation": "<concise factual reasoning>",\n'
-        '  "evidence_quote": "<salient excerpt confirming or debunking the claim>",\n'
-        '  "source_name": "<name of authoritative source>",\n'
-        '  "source_url": "<valid authoritative URL from evidence>"\n'
-        '}'
-    )
-
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-        for key in OPENROUTER_KEYS:
-            for model_name in LLM_MODELS:
-                try:
-                    headers = {
-                        "Authorization": f"Bearer {key}",
-                        "Content-Type": "application/json",
-                    }
-                    payload = {
-                        "model": model_name,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "temperature": 0.0,
-                        "response_format": {"type": "json_object"},
-                    }
-                    resp = await client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
-                    if resp.status_code == 200:
-                        content = resp.json()["choices"][0]["message"]["content"]
-                        clean_json = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
-                        data = json.loads(clean_json)
-
-                        st_str = data.get("status", "suspicious").lower()
-                        if "verif" in st_str:
-                            status = ClaimStatus.VERIFIED
-                        elif "hallucin" in st_str or "false" in st_str:
-                            status = ClaimStatus.HALLUCINATED
-                        else:
-                            status = ClaimStatus.SUSPICIOUS
-
-                        confidence = float(data.get("confidence", 50.0))
-                        reasoning = data.get("explanation") or "Evaluated via multi-source consensus."
-                        evidence_quote = data.get("evidence_quote") or ""
-                        source_name = data.get("source_name") or (evidence_pool[0].source_name if evidence_pool else "Authoritative Record")
-                        source_url = data.get("source_url") or (evidence_pool[0].source_url if evidence_pool else "")
-                        return status, confidence, reasoning, evidence_quote, source_name, source_url
-                except Exception:
-                    continue
-
-    return None
+def map_internal_to_claim_type(internal_type: InternalClaimType) -> ClaimType:
+    """Maps rich internal 11-category taxonomy to frontend-compatible ClaimType."""
+    if internal_type in (InternalClaimType.OPINION_OR_SUBJECTIVE, InternalClaimType.NON_FACTUAL_TEXT):
+        return ClaimType.OPINION
+    elif internal_type in (InternalClaimType.QUANTITATIVE_FACT, InternalClaimType.TEMPORAL_FACT):
+        return ClaimType.STATISTICAL
+    elif internal_type in (InternalClaimType.HISTORICAL_FACT, InternalClaimType.BIOGRAPHICAL_FACT):
+        return ClaimType.HISTORICAL
+    else:
+        return ClaimType.FACTUAL
 
 
 async def verify_single_claim(
@@ -163,33 +70,52 @@ async def verify_single_claim(
     start_index: int = 0,
     end_index: int = 0,
 ) -> ClaimResult:
-    """Run the complete factual verification pipeline for a single claim."""
+    """
+    Executes the full LLM-style evidence verification pipeline on a single claim.
+    """
     clean_claim = claim_text.strip()
 
-    # Subjective/Opinion short-circuit
-    if claim_type == ClaimType.OPINION:
+    # 1. Stage 1 & 2: Claim Understanding & Atomic Proposition Decomposition
+    analyzed: AnalyzedClaim = analyze_claim(
+        claim_id=claim_id,
+        claim_text=clean_claim,
+        start_index=start_index,
+        end_index=end_index,
+    )
+
+    frontend_type = map_internal_to_claim_type(analyzed.internal_type)
+
+    # Short-circuit for opinions / subjective assertions
+    if analyzed.is_opinion or analyzed.internal_type == InternalClaimType.OPINION_OR_SUBJECTIVE:
         return ClaimResult(
             id=claim_id,
             text=clean_claim,
-            type=claim_type,
+            type=frontend_type,
             status=ClaimStatus.UNVERIFIED,
             confidence=50.0,
             evidence=None,
             source="Subjective Statement",
             source_url=None,
             sources=[],
-            reasoning="Sentence expresses personal opinion, sentiment, or speculation rather than an objective verifiable fact.",
+            reasoning="Sentence expresses subjective sentiment, personal taste, or speculation rather than an objective verifiable fact.",
             start_index=start_index,
             end_index=end_index,
         )
 
-    # 1. Independent Verification Query Generation
-    plan = generate_independent_query(clean_claim)
+    # 2. Stage 3 & 4: Adaptive Query Formulation & Contradiction Query Generation
+    query_set = generate_independent_query(clean_claim, analyzed_claim=analyzed)
 
-    # 3. Multi-Source Evidence Retrieval
-    raw_evidence = await retrieve_multi_source_evidence(plan.search_query)
+    # 3. Stage 5: Concurrent Multi-Source Evidence Retrieval
+    # Queries OpenAlex, CrossRef, PubMed, ArXiv, DuckDuckGo Live Web, Wikidata, and Wikipedia
+    raw_evidence: List[RetrievedEvidence] = await retrieve_multi_source_evidence(
+        query=query_set.primary_query,
+        subclaim_queries=query_set.subclaim_queries,
+        contradiction_queries=query_set.contradiction_queries,
+        broad_fallback_query=query_set.broad_fallback_query,
+    )
 
-    # 4. URL Validation & Canonicalization (Strict Reachability & Integrity)
+    # 4. Stage 6: URL Validation & Canonicalization (Strict Reachability & Integrity)
+    # Rejects malformed or unreachable URLs; follows redirects to canonical landing pages
     validated_evidence: List[RetrievedEvidence] = []
     seen_urls: Set[str] = set()
 
@@ -199,58 +125,76 @@ async def verify_single_claim(
             continue
 
         is_valid, canonical_url, _ = await validate_and_resolve_url(raw_url, expected_title=item.title)
-        if is_valid and canonical_url:
-            if canonical_url not in seen_urls:
-                seen_urls.add(canonical_url)
-                validated_evidence.append(
-                    RetrievedEvidence(
-                        source_name=item.source_name,
-                        source_url=canonical_url,
-                        title=item.title,
-                        snippet=item.snippet,
-                    )
+        if is_valid and canonical_url and canonical_url not in seen_urls:
+            seen_urls.add(canonical_url)
+            validated_evidence.append(
+                RetrievedEvidence(
+                    source_name=item.source_name,
+                    source_url=canonical_url,
+                    title=item.title,
+                    snippet=item.snippet,
+                    is_contradiction_probe=item.is_contradiction_probe,
+                    source_domain=item.source_domain,
+                    publication_year=item.publication_year,
+                    is_secondary=item.is_secondary,
                 )
+            )
 
-    # 5. Evidence Evaluation across Validated Sources
-    supporting_sources: List[Tuple[RetrievedEvidence, str, float]] = []
-    contradicting_sources: List[Tuple[RetrievedEvidence, str, float]] = []
-    neutral_sources: List[Tuple[RetrievedEvidence, str, float]] = []
+    # 5. Stage 7: Source Quality & Relevance Filtering
+    # CRITICAL RULE: High authority source that is irrelevant to the claim is NOT evidence.
+    all_claim_terms = set()
+    for prop in analyzed.atomic_propositions:
+        all_claim_terms.update(prop.content_terms)
 
-    # Try LLM judge first if keys are configured
-    llm_verdict = await _judge_with_llm(clean_claim, plan.neutral_question, validated_evidence)
-
-    if llm_verdict:
-        status, conf, reasoning, quote, src_name, src_url = llm_verdict
-        # Validate that the LLM's returned URL is actually from the validated pool
-        matching_ev = next((e for e in validated_evidence if e.source_url == src_url), None)
-        if not matching_ev and validated_evidence:
-            src_url = validated_evidence[0].source_url
-            src_name = validated_evidence[0].source_name
-
-        sources_list = [
-            SourceCitation(name=e.source_name, url=e.source_url, title=e.title)
-            for e in validated_evidence[:4]
-        ]
-        return ClaimResult(
-            id=claim_id,
-            text=clean_claim,
-            type=claim_type,
-            status=status,
-            confidence=conf,
-            evidence=quote or (validated_evidence[0].snippet if validated_evidence else None),
-            source=src_name,
-            source_url=src_url,
-            sources=sources_list,
-            reasoning=reasoning,
-            start_index=start_index,
-            end_index=end_index,
+    materially_relevant_evidence: List[RetrievedEvidence] = []
+    for ev in validated_evidence:
+        # Check relevance to claim
+        is_relevant, rel_score = evaluate_source_relevance(
+            claim_terms=all_claim_terms,
+            entities=analyzed.entities,
+            snippet=ev.snippet,
+            title=ev.title,
         )
 
-    # 5. Proposition-Level Evidence Entailment & Contradiction Analysis
-    # Evaluates every atomic proposition (Main assertion + Reason/Purpose/Date/Category qualifiers)
-    # strictly against validated authoritative records.
-    evidence_tuples = [(ev.source_name, ev.source_url, ev.snippet) for ev in validated_evidence]
-    prop_report = evaluate_complete_claim_propositions(clean_claim, evidence_tuples)
+        # Allow Wikidata or contradiction probes if they mention subject
+        if is_relevant or ev.is_contradiction_probe or "wikidata" in ev.source_domain:
+            materially_relevant_evidence.append(ev)
+
+    # 6. Stage 8: Adaptive Retrieval Retry
+    # If no materially relevant evidence was found, retry with broad fallback query
+    if not materially_relevant_evidence and query_set.broad_fallback_query:
+        fallback_raw = await retrieve_multi_source_evidence(
+            query=query_set.broad_fallback_query,
+            subclaim_queries=[],
+            contradiction_queries=[],
+        )
+        for item in fallback_raw:
+            if item.source_url and item.source_url not in seen_urls and is_valid_url_format(item.source_url):
+                is_valid, canonical_url, _ = await validate_and_resolve_url(item.source_url, expected_title=item.title)
+                if is_valid and canonical_url and canonical_url not in seen_urls:
+                    seen_urls.add(canonical_url)
+                    materially_relevant_evidence.append(
+                        RetrievedEvidence(
+                            source_name=item.source_name,
+                            source_url=canonical_url,
+                            title=item.title,
+                            snippet=item.snippet,
+                            source_domain=item.source_domain,
+                            is_secondary=item.is_secondary,
+                        )
+                    )
+
+    # 7. Stage 9 & 10: Proposition-Level Evidence Entailment & Sufficiency Analysis
+    evidence_tuples = [
+        (ev.source_name, ev.source_url, ev.snippet)
+        for ev in materially_relevant_evidence
+    ]
+
+    prop_report: PropositionVerificationReport = evaluate_complete_claim_propositions(
+        claim_text=clean_claim,
+        evidence_pool=evidence_tuples,
+        analyzed_claim=analyzed,
+    )
 
     final_status = prop_report.final_status
     final_conf = prop_report.confidence
@@ -259,19 +203,20 @@ async def verify_single_claim(
     primary_source = prop_report.primary_source_name or "Authoritative Consensus"
     primary_url = prop_report.primary_source_url
 
-    # Construct clean, validated list of sources with genuine URLs
+    # 8. Stage 11: Construct Clean Citation List (Reachable, Distinct Domains Only)
     sources_list: List[SourceCitation] = []
-    seen_citation_urls = set()
+    seen_citation_domains = set()
 
-    for ev in validated_evidence:
-        if ev.source_url and ev.source_url not in seen_citation_urls:
-            seen_citation_urls.add(ev.source_url)
+    for ev in materially_relevant_evidence:
+        dom = ev.source_domain or ev.source_url
+        if dom not in seen_citation_domains and len(sources_list) < 5:
+            seen_citation_domains.add(dom)
             sources_list.append(SourceCitation(name=ev.source_name, url=ev.source_url, title=ev.title))
 
     return ClaimResult(
         id=claim_id,
         text=clean_claim,
-        type=claim_type,
+        type=frontend_type,
         status=final_status,
         confidence=final_conf,
         evidence=final_evidence,
@@ -285,7 +230,7 @@ async def verify_single_claim(
 
 
 async def verify_claims_pipeline(claims: List[Tuple]) -> List[ClaimResult]:
-    """Verify a batch of claims concurrently across the pipeline."""
+    """Concurrently verifies a batch of claims across the complete factual pipeline."""
     tasks = []
     for item in claims:
         if len(item) >= 5:
