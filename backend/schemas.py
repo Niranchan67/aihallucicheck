@@ -62,6 +62,34 @@ class SourceCitation(BaseModel):
     title: Optional[str] = None
 
 
+class PropositionProof(BaseModel):
+    statement: str
+    prop_type: str = "primary"  # primary, reason, date, location, attribution
+    status: str = "supported"   # supported, contradicted, unverified
+    evidence_excerpt: Optional[str] = None
+    source_name: Optional[str] = None
+    source_url: Optional[str] = None
+
+
+class AuthorityCheck(BaseModel):
+    domain: str
+    source_name: str
+    authority_tier: float = 0.85
+    authority_label: str = "Reputable Reference"
+    dataset: str = "Live Web Index"
+    status: str = "verified"
+
+
+class EvidenceProof(BaseModel):
+    dataset: str
+    source_title: str
+    source_url: str
+    quote: str
+    authority_tier: float = 0.85
+    authority_label: str = "Reputable Reference"
+    publication_year: Optional[str] = None
+
+
 class ClaimResult(BaseModel):
     id: str
     text: str
@@ -73,6 +101,10 @@ class ClaimResult(BaseModel):
     source_url: Optional[str] = None
     sources: Optional[List[SourceCitation]] = []
     reasoning: Optional[str] = None
+    propositions_evaluated: Optional[List[PropositionProof]] = []
+    authority_checks: Optional[List[AuthorityCheck]] = []
+    evidence_proofs: Optional[List[EvidenceProof]] = []
+    contradiction_details: Optional[str] = None
     start_index: Optional[int] = None
     end_index: Optional[int] = None
 

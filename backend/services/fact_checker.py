@@ -185,14 +185,9 @@ async def verify_single_claim(
                     )
 
     # 7. Stage 9 & 10: Proposition-Level Evidence Entailment & Sufficiency Analysis
-    evidence_tuples = [
-        (ev.source_name, ev.source_url, ev.snippet)
-        for ev in materially_relevant_evidence
-    ]
-
     prop_report: PropositionVerificationReport = evaluate_complete_claim_propositions(
         claim_text=clean_claim,
-        evidence_pool=evidence_tuples,
+        evidence_pool=materially_relevant_evidence,
         analyzed_claim=analyzed,
     )
 
@@ -224,6 +219,10 @@ async def verify_single_claim(
         source_url=primary_url,
         sources=sources_list,
         reasoning=final_reasoning,
+        propositions_evaluated=prop_report.propositions_evaluated,
+        authority_checks=prop_report.authority_checks,
+        evidence_proofs=prop_report.evidence_proofs,
+        contradiction_details=prop_report.contradiction_details,
         start_index=start_index,
         end_index=end_index,
     )

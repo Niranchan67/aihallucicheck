@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   CheckCircle2,
   AlertTriangle,
@@ -17,6 +17,11 @@ import {
   Info,
   Layers,
   ChevronRight,
+  ShieldCheck,
+  FileCheck2,
+  Scale,
+  Quote,
+  AlertCircle,
 } from "lucide-react";
 import type { VerificationResponse, ClaimResult, CitationResult } from "../types";
 
@@ -29,6 +34,17 @@ export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
   const [copied, setCopied] = useState(false);
   const [selectedClaimIndex, setSelectedClaimIndex] = useState<number | null>(0);
   const [activeTab, setActiveTab] = useState<"text" | "claims" | "citations">("text");
+
+  // Keyboard shortcut: Esc to dismiss sentence inspection card
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedClaimIndex(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const claims = result.claims || [];
   const citations = result.citations || [];
@@ -469,75 +485,331 @@ export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
         </div>
 
         {/* Selected Sentence Deep Rationale Pop-up Card */}
-        {selectedClaimIndex !== null && claims[selectedClaimIndex] && (
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-3 animate-fade-in shadow-xs">
-            <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-2">
-              <div>
-                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold block">
-                  Sentence Claim #{selectedClaimIndex + 1} Inspection
-                </span>
-                <span className="font-bold text-sm text-slate-900">
-                  Status: {claims[selectedClaimIndex].status.toUpperCase()} ({Math.round(claims[selectedClaimIndex].confidence)}% Certainty)
-                </span>
+        {selectedClaimIndex !== null && claims[selectedClaimIndex] && (() => {
+          const curClaim = claims[selectedClaimIndex];
+          const statusConfig =
+            curClaim.status === "verified"
+              ? {
+                  label: "VERIFIED",
+                  icon: CheckCircle2,
+                  badgeBg: "bg-emerald-50 text-emerald-800 border-emerald-200",
+                  iconColor: "text-emerald-600",
+                }
+              : curClaim.status === "suspicious"
+              ? {
+                  label: "SUSPICIOUS",
+                  icon: AlertTriangle,
+                  badgeBg: "bg-amber-50 text-amber-800 border-amber-200",
+                  iconColor: "text-amber-600",
+                }
+              : {
+                  label: "HALLUCINATED",
+                  icon: XCircle,
+                  badgeBg: "bg-rose-50 text-rose-800 border-rose-200",
+                  iconColor: "text-rose-600",
+                };
+          const StatusIcon = statusConfig.icon;
+
+          return (
+            <div className="p-5 rounded-2xl bg-slate-50/90 border border-slate-200 text-xs space-y-4 animate-fade-in shadow-xs">
+              {/* Header Bar */}
+              <div className="flex items-start justify-between gap-3 border-b border-slate-200/80 pb-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold">
+                      Sentence Claim #{selectedClaimIndex + 1} Deep Proof
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-200/70 text-slate-700 text-[10px] font-mono uppercase font-semibold">
+                      {curClaim.type}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusConfig.badgeBg}`}
+                    >
+                      <StatusIcon size={13} className={statusConfig.iconColor} />
+                      <span>{statusConfig.label}</span>
+                      <span className="font-mono tabular-nums font-semibold">
+                        ({Math.round(curClaim.confidence)}% Certainty)
+                      </span>
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedClaimIndex(null)}
+                  className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-900 bg-white hover:bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 transition-colors shadow-2xs text-xs font-mono font-bold cursor-pointer"
+                  title="Close inspection card (Esc)"
+                >
+                  <span>✕ Close</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Esc</span>
+                </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setSelectedClaimIndex(null)}
-                className="text-slate-400 hover:text-slate-900 p-1 cursor-pointer font-mono font-bold"
-              >
-                ✕ Close
-              </button>
-            </div>
+              {/* Exact Tested Statement */}
+              <div className="space-y-1">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 font-bold block">
+                  Exact Tested Assertion:
+                </span>
+                <p className="text-slate-900 bg-white p-3.5 rounded-xl border border-slate-200 font-sans text-sm leading-relaxed shadow-2xs font-medium">
+                  "{curClaim.text}"
+                </p>
+              </div>
 
-            <div className="space-y-1">
-              <span className="text-[11px] font-mono text-slate-500 uppercase">Exact Statement:</span>
-              <p className="text-slate-800 bg-white p-3 rounded-lg border border-slate-200 font-sans leading-relaxed">
-                "{claims[selectedClaimIndex].text}"
-              </p>
-            </div>
+              {/* Direct Contradiction Callout Box */}
+              {curClaim.contradiction_details && (
+                <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-950 text-xs shadow-2xs">
+                  <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1 min-w-0">
+                    <span className="font-mono font-bold uppercase tracking-wider text-[11px] text-rose-800 block">
+                      Direct Factual Contradiction Detected
+                    </span>
+                    <p className="font-sans leading-relaxed text-rose-900">
+                      {curClaim.contradiction_details}
+                    </p>
+                  </div>
+                </div>
+              )}
 
-            <div className="space-y-1">
-              <span className="text-[11px] font-mono text-slate-700 uppercase font-semibold">
-                Verification Rationale:
-              </span>
-              <p className="text-slate-700 leading-relaxed font-sans">
-                {claims[selectedClaimIndex].reasoning || "Cross-examined across independent sources with consensus corroboration."}
-              </p>
-            </div>
+              {/* Deep Multi-Sentence Reasoning & Entailment Analysis */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5 text-slate-800">
+                  <Scale size={13} className="text-slate-600" />
+                  <span className="text-[11px] font-mono text-slate-700 uppercase font-bold tracking-wider">
+                    Deep Factual Reasoning &amp; Entailment Analysis:
+                  </span>
+                </div>
+                <div className="space-y-2 bg-white p-3.5 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed font-sans shadow-2xs">
+                  {(curClaim.reasoning || "Cross-examined across independent sources with consensus corroboration.")
+                    .split("\n\n")
+                    .map((para, pIdx) => (
+                      <p key={pIdx} className="text-slate-700 leading-relaxed font-sans">
+                        {para.trim()}
+                      </p>
+                    ))}
+                </div>
+              </div>
 
-            {/* Outbound Verified Sources */}
-            <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-mono text-slate-500">Evidence Sources:</span>
-              {claims[selectedClaimIndex].sources && claims[selectedClaimIndex].sources!.length > 0 ? (
-                claims[selectedClaimIndex].sources!.map((s, si) => (
+              {/* Authority Registry & Knowledge Graph Checks */}
+              {curClaim.authority_checks && curClaim.authority_checks.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-slate-800">
+                    <ShieldCheck size={13} className="text-slate-600" />
+                    <span className="text-[11px] font-mono text-slate-700 uppercase font-bold tracking-wider">
+                      Authority Registry Checks ({curClaim.authority_checks.length}):
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {curClaim.authority_checks.map((auth, aIdx) => (
+                      <div
+                        key={aIdx}
+                        className="p-2.5 rounded-xl bg-white border border-slate-200 flex flex-col justify-between gap-1.5 shadow-2xs text-[11px]"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-slate-800 truncate font-sans">
+                            {auth.dataset}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                              auth.status === "authoritative_match"
+                                ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                                : auth.status === "secondary_corroboration"
+                                ? "bg-slate-100 text-slate-700 border border-slate-200"
+                                : "bg-amber-50 text-amber-800 border border-amber-200"
+                            }`}
+                          >
+                            {auth.status === "authoritative_match"
+                              ? "Authoritative"
+                              : auth.status === "secondary_corroboration"
+                              ? "Secondary"
+                              : "Unverified"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-[10px] text-slate-500 font-mono">
+                          <span className="truncate">{auth.domain}</span>
+                          <span className="tabular-nums font-semibold text-slate-700">
+                            Tier {auth.authority_tier.toFixed(2)} · {auth.authority_label}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Atomic Proposition Decomposition & Entailment Proofs */}
+              {curClaim.propositions_evaluated && curClaim.propositions_evaluated.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-slate-800">
+                      <FileCheck2 size={13} className="text-slate-600" />
+                      <span className="text-[11px] font-mono text-slate-700 uppercase font-bold tracking-wider">
+                        Atomic Proposition Proofs ({curClaim.propositions_evaluated.filter((p) => p.status === "supported" || p.status === "corroborated").length}/
+                        {curClaim.propositions_evaluated.length} Supported):
+                      </span>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {curClaim.propositions_evaluated.map((prop, pIdx) => {
+                      const pCorroborated = prop.status === "supported" || prop.status === "corroborated";
+                      const pContradicted = prop.status === "contradicted";
+                      return (
+                        <div
+                          key={pIdx}
+                          className={`p-3 rounded-xl border bg-white shadow-2xs space-y-1.5 ${
+                            pCorroborated
+                              ? "border-emerald-200"
+                              : pContradicted
+                              ? "border-rose-200"
+                              : "border-amber-200"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-start gap-2 min-w-0">
+                              {pCorroborated ? (
+                                <CheckCircle2 size={14} className="text-emerald-600 shrink-0 mt-0.5" />
+                              ) : pContradicted ? (
+                                <XCircle size={14} className="text-rose-600 shrink-0 mt-0.5" />
+                              ) : (
+                                <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                              )}
+                              <div className="min-w-0">
+                                <span className="font-sans font-medium text-slate-800 text-xs block leading-snug">
+                                  {prop.statement}
+                                </span>
+                                {prop.prop_type && (
+                                  <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 text-[10px] font-mono capitalize">
+                                    {prop.prop_type} Component
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <span
+                              className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase border ${
+                                pCorroborated
+                                  ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                  : pContradicted
+                                  ? "bg-rose-50 text-rose-800 border-rose-200"
+                                  : "bg-amber-50 text-amber-800 border-amber-200"
+                              }`}
+                            >
+                              {prop.status}
+                            </span>
+                          </div>
+
+                          {prop.evidence_excerpt && (
+                            <div className="pl-5 border-l-2 border-slate-200 ml-1 mt-1 text-[11px] text-slate-600 italic font-sans">
+                              "{prop.evidence_excerpt}"
+                              {prop.source_name && (
+                                <span className="not-italic block mt-0.5 text-[10px] font-mono text-slate-500">
+                                  Corroborating record:{" "}
+                                  {prop.source_url ? (
+                                    <a
+                                      href={prop.source_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-slate-700 hover:text-slate-950 underline underline-offset-2"
+                                    >
+                                      {prop.source_name}
+                                    </a>
+                                  ) : (
+                                    <span>{prop.source_name}</span>
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Cross-Referenced Evidence Quotes Proofs */}
+              {curClaim.evidence_proofs && curClaim.evidence_proofs.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-slate-800">
+                    <Quote size={13} className="text-slate-600" />
+                    <span className="text-[11px] font-mono text-slate-700 uppercase font-bold tracking-wider">
+                      Corroborated Evidence Proofs ({curClaim.evidence_proofs.length}):
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {curClaim.evidence_proofs.map((ev, eIdx) => (
+                      <div
+                        key={eIdx}
+                        className="p-3 rounded-xl bg-white border border-slate-200 shadow-2xs space-y-2 text-xs"
+                      >
+                        <p className="text-slate-700 italic font-sans leading-relaxed text-[11px]">
+                          "{ev.quote}"
+                        </p>
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-100 text-[10px] font-mono">
+                          <div className="flex items-center gap-2">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
+                              {ev.dataset}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold uppercase">
+                              {ev.authority_label}
+                            </span>
+                            <span className="text-slate-400 tabular-nums">
+                              Tier: {ev.authority_tier.toFixed(2)}
+                            </span>
+                          </div>
+                          {ev.source_url ? (
+                            <a
+                              href={ev.source_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-slate-700 hover:text-slate-950 font-medium underline underline-offset-2"
+                            >
+                              <span>{ev.source_title}</span>
+                              <ExternalLink size={10} />
+                            </a>
+                          ) : (
+                            <span className="text-slate-500">{ev.source_title}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Outbound Verified Sources (Fallback / Direct Link Quick Bar) */}
+              <div className="pt-2.5 border-t border-slate-200/80 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-mono text-slate-500 font-semibold">Live Sources:</span>
+                {curClaim.sources && curClaim.sources.length > 0 ? (
+                  curClaim.sources.map((s, si) => (
+                    <a
+                      key={si}
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] text-slate-700 hover:text-slate-950 bg-white hover:bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 transition-colors shadow-2xs font-medium"
+                    >
+                      <span>{s.name}</span>
+                      <ExternalLink size={10} />
+                    </a>
+                  ))
+                ) : curClaim.source_url ? (
                   <a
-                    key={si}
-                    href={s.url}
+                    href={curClaim.source_url!}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[11px] text-slate-700 hover:text-slate-950 bg-white hover:bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 transition-colors shadow-2xs font-medium"
                   >
-                    <span>{s.name}</span>
+                    <span>{curClaim.source || "Primary Source"}</span>
                     <ExternalLink size={10} />
                   </a>
-                ))
-              ) : claims[selectedClaimIndex].source_url ? (
-                <a
-                  href={claims[selectedClaimIndex].source_url!}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] text-slate-700 hover:text-slate-950 bg-white hover:bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 transition-colors shadow-2xs font-medium"
-                >
-                  <span>{claims[selectedClaimIndex].source}</span>
-                  <ExternalLink size={10} />
-                </a>
-              ) : (
-                <span className="text-[11px] text-slate-400 font-mono">Synthesized via consensus</span>
-              )}
+                ) : (
+                  <span className="text-[11px] text-slate-400 font-mono">Synthesized via multi-dataset consensus</span>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Claims Breakdown & Citations Tabs */}
@@ -571,71 +843,220 @@ export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
         <div className="p-5">
           {activeTab === "text" && (
             <div className="space-y-3">
-              {claims.map((cl, i) => (
-                <div
-                  key={cl.id || i}
-                  className="p-4 rounded-xl border border-slate-200 bg-white space-y-2 hover:border-slate-300 transition-all shadow-2xs"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400 font-bold">#{i + 1}</span>
-                      <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 uppercase font-semibold">
-                        {cl.type}
+              {claims.map((cl, i) => {
+                const statusBadge =
+                  cl.status === "verified"
+                    ? {
+                        label: "VERIFIED",
+                        icon: CheckCircle2,
+                        badgeBg: "bg-emerald-50 text-emerald-800 border-emerald-200",
+                        iconColor: "text-emerald-600",
+                      }
+                    : cl.status === "suspicious"
+                    ? {
+                        label: "SUSPICIOUS",
+                        icon: AlertTriangle,
+                        badgeBg: "bg-amber-50 text-amber-800 border-amber-200",
+                        iconColor: "text-amber-600",
+                      }
+                    : {
+                        label: "HALLUCINATED",
+                        icon: XCircle,
+                        badgeBg: "bg-rose-50 text-rose-800 border-rose-200",
+                        iconColor: "text-rose-600",
+                      };
+                const BadgeIcon = statusBadge.icon;
+
+                return (
+                  <div
+                    key={cl.id || i}
+                    className="p-4 sm:p-5 rounded-2xl border border-slate-200 bg-white space-y-3 hover:border-slate-300 transition-all shadow-2xs"
+                  >
+                    {/* Card Header */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 font-bold">#{i + 1}</span>
+                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 uppercase font-semibold">
+                          {cl.type}
+                        </span>
+                        {cl.propositions_evaluated && cl.propositions_evaluated.length > 0 && (
+                          <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-50 text-slate-600 border border-slate-200 text-[10px]">
+                            <FileCheck2 size={11} />
+                            <span>
+                              {cl.propositions_evaluated.filter((p) => p.status === "supported" || p.status === "corroborated").length}/
+                              {cl.propositions_evaluated.length} Supported
+                            </span>
+                          </span>
+                        )}
+                      </div>
+
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusBadge.badgeBg}`}
+                      >
+                        <BadgeIcon size={12} className={statusBadge.iconColor} />
+                        <span>{statusBadge.label}</span>
+                        <span className="font-mono tabular-nums font-semibold">
+                          · {Math.round(cl.confidence)}%
+                        </span>
                       </span>
                     </div>
 
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                        cl.status === "verified"
-                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                          : cl.status === "suspicious"
-                          ? "bg-amber-50 text-amber-700 border-amber-200"
-                          : "bg-rose-50 text-rose-700 border-rose-200"
-                      }`}
-                    >
-                      {cl.status.toUpperCase()} · {Math.round(cl.confidence)}%
-                    </span>
-                  </div>
-
-                  <p className="text-sm text-slate-800 font-sans leading-relaxed">{cl.text}</p>
-
-                  <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <p className="text-slate-500 text-[11px] leading-snug flex-1">
-                      {cl.reasoning || "Neutral cross-examination corroborated against open web records."}
+                    {/* Claim Text */}
+                    <p className="text-sm sm:text-base font-semibold text-slate-900 font-sans leading-relaxed">
+                      "{cl.text}"
                     </p>
 
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="text-[10px] font-mono text-slate-400">Sources:</span>
-                      {cl.sources && cl.sources.length > 0 ? (
-                        cl.sources.map((s, si) => (
+                    {/* Direct Contradiction Banner */}
+                    {cl.contradiction_details && (
+                      <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-950 text-xs shadow-2xs">
+                        <AlertCircle size={15} className="text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-mono font-bold uppercase tracking-wider text-[10px] text-rose-800 block">
+                            Direct Factual Contradiction
+                          </span>
+                          <p className="font-sans leading-relaxed text-rose-900 mt-0.5">
+                            {cl.contradiction_details}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Deep Multi-Sentence Reasoning */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-1.5 text-slate-700">
+                        <Scale size={12} className="text-slate-500" />
+                        <span className="text-[10px] font-mono uppercase font-bold tracking-wider text-slate-500">
+                          Verification Rationale &amp; Entailment:
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 text-xs text-slate-700 bg-slate-50/70 p-3 rounded-xl border border-slate-100 font-sans leading-relaxed">
+                        {(cl.reasoning || "Neutral cross-examination corroborated against open web records.")
+                          .split("\n\n")
+                          .map((para, pIdx) => (
+                            <p key={pIdx} className="leading-relaxed">
+                              {para.trim()}
+                            </p>
+                          ))}
+                      </div>
+                    </div>
+
+                    {/* Authority Checks Pill Chips */}
+                    {cl.authority_checks && cl.authority_checks.length > 0 && (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <ShieldCheck size={11} />
+                          <span className="text-[10px] font-mono uppercase font-bold tracking-wider">
+                            Authority Checks:
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {cl.authority_checks.map((a, ai) => (
+                            <span
+                              key={ai}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-mono font-medium border border-slate-200"
+                              title={`${a.dataset} (${a.domain}) · Tier ${a.authority_tier.toFixed(2)} (${a.authority_label})`}
+                            >
+                              <span>{a.dataset}</span>
+                              <span className="text-slate-500 tabular-nums">({a.authority_tier.toFixed(2)})</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Proposition Breakdown */}
+                    {cl.propositions_evaluated && cl.propositions_evaluated.length > 0 && (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <FileCheck2 size={11} />
+                          <span className="text-[10px] font-mono uppercase font-bold tracking-wider">
+                            Proposition Proofs:
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          {cl.propositions_evaluated.map((prop, pi) => {
+                            const pCorroborated = prop.status === "supported" || prop.status === "corroborated";
+                            const pContradicted = prop.status === "contradicted";
+                            return (
+                              <div
+                                key={pi}
+                                className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200/80 text-[11px]"
+                              >
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  {pCorroborated ? (
+                                    <CheckCircle2 size={12} className="text-emerald-600 shrink-0" />
+                                  ) : pContradicted ? (
+                                    <XCircle size={12} className="text-rose-600 shrink-0" />
+                                  ) : (
+                                    <AlertTriangle size={12} className="text-amber-600 shrink-0" />
+                                  )}
+                                  <span className="text-slate-800 truncate font-sans">{prop.statement}</span>
+                                </div>
+                                <span
+                                  className={`shrink-0 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold uppercase ${
+                                    pCorroborated
+                                      ? "bg-emerald-50 text-emerald-800"
+                                      : pContradicted
+                                      ? "bg-rose-50 text-rose-800"
+                                      : "bg-amber-50 text-amber-800"
+                                  }`}
+                                >
+                                  {prop.status}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Card Footer: Sources & Inspect Button */}
+                    <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-mono text-slate-400 font-semibold">Sources:</span>
+                        {cl.sources && cl.sources.length > 0 ? (
+                          cl.sources.map((s, si) => (
+                            <a
+                              key={si}
+                              href={s.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-700 hover:text-slate-950 bg-slate-50 hover:bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 transition-colors"
+                            >
+                              <span>{s.name}</span>
+                              <ExternalLink size={10} />
+                            </a>
+                          ))
+                        ) : cl.source_url ? (
                           <a
-                            key={si}
-                            href={s.url}
+                            href={cl.source_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-700 hover:text-slate-950 bg-slate-50 hover:bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 transition-colors"
                           >
-                            <span>{s.name}</span>
+                            <span>{cl.source || "Source"}</span>
                             <ExternalLink size={10} />
                           </a>
-                        ))
-                      ) : cl.source_url ? (
-                        <a
-                          href={cl.source_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-700 hover:text-slate-950 bg-slate-50 hover:bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 transition-colors"
-                        >
-                          <span>{cl.source || "Source"}</span>
-                          <ExternalLink size={10} />
-                        </a>
-                      ) : (
-                        <span className="text-[11px] text-slate-400 font-mono">Consensus Index</span>
-                      )}
+                        ) : (
+                          <span className="text-[11px] text-slate-400 font-mono">Consensus Index</span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedClaimIndex(i);
+                          window.scrollTo({ top: 350, behavior: "smooth" });
+                        }}
+                        className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-700 hover:text-slate-950 font-bold bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-full transition-colors cursor-pointer shadow-2xs"
+                      >
+                        <span>Deep Inspect</span>
+                        <ChevronRight size={11} />
+                      </button>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

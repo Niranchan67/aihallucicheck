@@ -36,12 +36,68 @@ export function ClaimCard({ claim, index }: { claim: ClaimResult; index: number 
       </button>
 
       {open && hasDetails && (
-        <div className="mt-3 space-y-2 rounded bg-paper px-3.5 py-3 text-sm">
+        <div className="mt-3 space-y-3 rounded bg-paper px-3.5 py-3 text-sm">
+          {claim.contradiction_details && (
+            <div className="rounded border border-contradicted/40 bg-contradicted/10 p-2 text-xs text-contradicted">
+              <span className="font-semibold">Contradiction: </span>
+              <span>{claim.contradiction_details}</span>
+            </div>
+          )}
           {claim.reasoning && (
-            <p>
-              <span className="text-ink-soft">Reasoning — </span>
-              <span className="text-ink">{claim.reasoning}</span>
-            </p>
+            <div>
+              <span className="font-mono text-xs uppercase tracking-wider text-ink-soft block mb-1">
+                Factual Reasoning
+              </span>
+              <div className="space-y-1.5 text-ink leading-relaxed">
+                {claim.reasoning.split("\n\n").map((p, pi) => (
+                  <p key={pi}>{p.trim()}</p>
+                ))}
+              </div>
+            </div>
+          )}
+          {claim.authority_checks && claim.authority_checks.length > 0 && (
+            <div>
+              <span className="font-mono text-xs uppercase tracking-wider text-ink-soft block mb-1">
+                Authority Registry Checks
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {claim.authority_checks.map((a, ai) => (
+                  <span
+                    key={ai}
+                    className="inline-flex items-center gap-1 rounded bg-paper-subtle px-2 py-0.5 text-[11px] font-mono text-ink-soft"
+                  >
+                    <span>{a.dataset}</span>
+                    <span>({a.authority_tier.toFixed(2)})</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {claim.propositions_evaluated && claim.propositions_evaluated.length > 0 && (
+            <div>
+              <span className="font-mono text-xs uppercase tracking-wider text-ink-soft block mb-1">
+                Proposition Evaluations ({claim.propositions_evaluated.filter((p) => p.status === "supported" || p.status === "corroborated").length}/
+                {claim.propositions_evaluated.length} supported)
+              </span>
+              <ul className="space-y-1 text-xs">
+                {claim.propositions_evaluated.map((prop, pi) => (
+                  <li key={pi} className="flex items-center justify-between gap-2 rounded bg-paper-subtle px-2 py-1">
+                    <span className="text-ink truncate">{prop.statement}</span>
+                    <span
+                      className={`font-mono text-[10px] uppercase font-bold ${
+                        prop.status === "supported" || prop.status === "corroborated"
+                          ? "text-verified"
+                          : prop.status === "contradicted"
+                          ? "text-contradicted"
+                          : "text-amber-500"
+                      }`}
+                    >
+                      {prop.status}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           {claim.evidence && (
             <p>

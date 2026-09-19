@@ -24,6 +24,34 @@ export interface SourceCitation {
   title?: string;
 }
 
+export interface PropositionProof {
+  statement: string;
+  prop_type: "primary" | "reason" | "date" | "location" | "attribution" | string;
+  status: "supported" | "contradicted" | "partial" | "unverified" | string;
+  evidence_excerpt?: string | null;
+  source_name?: string | null;
+  source_url?: string | null;
+}
+
+export interface AuthorityCheck {
+  domain: string;
+  source_name: string;
+  authority_tier: number;
+  authority_label: string;
+  dataset: string;
+  status: string;
+}
+
+export interface EvidenceProof {
+  dataset: string;
+  source_title: string;
+  source_url: string;
+  quote: string;
+  authority_tier: number;
+  authority_label: string;
+  publication_year?: string | null;
+}
+
 export interface ClaimResult {
   id: string;
   text: string;
@@ -35,6 +63,10 @@ export interface ClaimResult {
   source_url: string | null;
   sources?: SourceCitation[];
   reasoning: string | null;
+  propositions_evaluated?: PropositionProof[];
+  authority_checks?: AuthorityCheck[];
+  evidence_proofs?: EvidenceProof[];
+  contradiction_details?: string | null;
 }
 
 export interface CitationResult {
