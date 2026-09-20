@@ -42,6 +42,15 @@ def get_db():
 
 def init_db() -> None:
     """Create tables if they don't exist yet. Safe to call on every startup."""
-    import models  # noqa: F401  (registers ORM classes with Base before create_all)
+    try:
+        import models  # noqa: F401  (registers ORM classes with Base before create_all)
+        Base.metadata.create_all(bind=engine)
+    except Exception as exc:
+        print(f"[db] Notice: Table auto-creation: {exc}")
 
-    Base.metadata.create_all(bind=engine)
+
+# Auto-initialize tables safely so serverless invocations never encounter missing tables
+try:
+    init_db()
+except Exception:
+    pass

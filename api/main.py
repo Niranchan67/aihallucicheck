@@ -259,7 +259,7 @@ def delete_verification(verification_id: str, db: Session = Depends(get_db)):
 frontend_dist = os.path.abspath(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
 )
-if os.path.exists(frontend_dist):
+if os.path.exists(frontend_dist) and not os.getenv("VERCEL"):
     from fastapi.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="static")
 
