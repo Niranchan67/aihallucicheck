@@ -67,6 +67,8 @@ export interface ClaimResult {
   authority_checks?: AuthorityCheck[];
   evidence_proofs?: EvidenceProof[];
   contradiction_details?: string | null;
+  start_index?: number;
+  end_index?: number;
 }
 
 export interface CitationResult {

@@ -50,11 +50,46 @@ export function parseTextToVerification(
     .map((s) => s.replace(/^[-*•\d.)\s]+/, "").trim())
     .filter((s) => s.length > 3);
 
+  // Split compound coordinate sentences (e.g., ", and ", ", but ", ";")
+  const verbRegex = /\b(is|are|was|were|has|have|had|consists?|contains?|includes?|won|invented|created|discovered|died|born|became|ruled|built|wrote|developed)\b|[a-z]{3,}ed\b/i;
+  const decomposedStatements: { text: string; start: number; end: number }[] = [];
+
   const sentencesToProcess = rawSentences.length > 0 ? rawSentences : [text];
+  for (const sentence of sentencesToProcess) {
+    const sOffset = text.indexOf(sentence);
+    const compoundParts = sentence.split(/(?:;\s*|,\s+(?:and|but|whereas|while)\s+|—\s*)/i);
+
+    if (compoundParts.length > 1 && compoundParts.every((p) => p.trim().split(/\s+/).length >= 3 && verbRegex.test(p))) {
+      let curSearchPos = sOffset >= 0 ? sOffset : 0;
+      for (const p of compoundParts) {
+        const clean = p.trim().replace(/[.,;]+$/, "");
+        if (clean.length > 3) {
+          const pIdx = text.indexOf(clean, curSearchPos);
+          const start = pIdx >= 0 ? pIdx : curSearchPos;
+          const end = start + clean.length;
+          curSearchPos = end;
+          decomposedStatements.push({
+            text: clean.charAt(0).toUpperCase() + clean.slice(1) + ".",
+            start,
+            end,
+          });
+        }
+      }
+    } else {
+      const start = sOffset >= 0 ? sOffset : 0;
+      decomposedStatements.push({
+        text: sentence,
+        start,
+        end: start + sentence.length,
+      });
+    }
+  }
+
   const claims: ClaimResult[] = [];
 
-  for (let i = 0; i < sentencesToProcess.length; i++) {
-    const statement = sentencesToProcess[i];
+  for (let i = 0; i < decomposedStatements.length; i++) {
+    const item = decomposedStatements[i];
+    const statement = item.text;
 
     // Determine statement type
     const hasNumber = /\b\d+(\.\d+)?%?\b/.test(statement);
@@ -88,6 +123,8 @@ export function parseTextToVerification(
       source_url: null,
       sources: [],
       reasoning,
+      start_index: item.start,
+      end_index: item.end,
     });
   }
 

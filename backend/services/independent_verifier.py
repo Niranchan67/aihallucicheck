@@ -151,6 +151,16 @@ def generate_independent_query(claim_text: str, analyzed_claim: Optional[Analyze
             contradiction_queries.append(f"{target_subj} nobel prize official citation reason")
             contradiction_queries.append(f"{target_subj} prize year citation")
 
+    # Capital city contradiction probe
+    if "capital" in clean.lower():
+        country_match = re.search(r"\bcapital\s+(?:city\s+)?of\s+([A-Za-z]+)\b", clean, re.I)
+        if not country_match:
+            country_match = re.search(r"\b([A-Za-z]+)\'s\s+capital\b", clean, re.I)
+        if country_match:
+            country_name = country_match.group(1).strip()
+            contradiction_queries.append(f"what is the capital of {country_name}")
+            contradiction_queries.append(f"capital city of {country_name} official")
+
     # General refutation / debunking probe for extraordinary or physics-defying claims
     if any(w in clean.lower() for w in ["faster than light", "miracle", "perpetual motion", "telepathy", "alien", "cure for all"]):
         contradiction_queries.append(f"{primary_query} debunked myth disproven")

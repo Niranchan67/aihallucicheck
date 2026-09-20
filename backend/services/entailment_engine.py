@@ -114,6 +114,7 @@ class PropositionVerificationReport:
 def evaluate_common_fact_equivalence(
     claim_text: str,
     evidence_snippet: str,
+    source_name: str = "Official Records",
 ) -> Optional[Tuple[EvidenceRelation, str]]:
     """
     Handles simple / common factual claims (capitals, basic measurements, definitions).
@@ -143,22 +144,60 @@ def evaluate_common_fact_equivalence(
                     "Verified via common factual consensus: Paris is the recognized capital of France."
                 )
 
-        # Generic capital pattern
+        # Extract asserted city and country
         cap_match = re.search(r"\b([A-Za-z]+)\s+is\s+(?:the\s+)?capital\s+(?:city\s+)?of\s+([A-Za-z]+)\b", c_low)
         if not cap_match:
             cap_match = re.search(r"\b(?:the\s+)?capital\s+(?:city\s+)?of\s+([A-Za-z]+)\s+is\s+([A-Za-z]+)\b", c_low)
             if cap_match:
-                country, city = cap_match.group(1), cap_match.group(2)
+                country, city = cap_match.group(1).lower().strip(), cap_match.group(2).lower().strip()
             else:
-                country, city = None, None
+                cap_match = re.search(r"\b([A-Za-z]+)\'s\s+capital\s+(?:city\s+)?is\s+([A-Za-z]+)\b", c_low)
+                if cap_match:
+                    country, city = cap_match.group(1).lower().strip(), cap_match.group(2).lower().strip()
+                else:
+                    country, city = None, None
         else:
-            city, country = cap_match.group(1), cap_match.group(2)
+            city, country = cap_match.group(1).lower().strip(), cap_match.group(2).lower().strip()
 
         if city and country:
-            if city in e_low and country in e_low and "capital" in e_low:
+            # 1. Direct support: evidence confirms asserted city is capital of country
+            sup_pats = [
+                rf"\b{re.escape(city)}\s+(?:is|,)?\s*(?:the\s+)?capital(?:\s+city|\s+and\s+[\w\s]+)?\s+of\s+{re.escape(country)}\b",
+                rf"\bcapital(?:\s+city|\s+and\s+[\w\s]+)?\s+of\s+{re.escape(country)}\s+(?:is|was)\s+{re.escape(city)}\b",
+                rf"\b{re.escape(country)}\'s\s+capital(?:\s+city)?\s+(?:is|was)\s+{re.escape(city)}\b",
+                rf"\b{re.escape(city)}\s+is\s+(?:the\s+)?capital\s+(?:city\s+)?of\s+{re.escape(country)}\b",
+            ]
+            for sp in sup_pats:
+                if re.search(sp, e_low):
+                    return (
+                        EvidenceRelation.DIRECT_SUPPORT,
+                        f"Directly corroborated: {city.capitalize()} is the verified capital of {country.capitalize()}."
+                    )
+
+            # 2. Contradiction: evidence names a DIFFERENT capital for country
+            contra_pats = [
+                rf"\b([a-z]+)\s*(?:,\s*the|\sis\sthe)\scapital\s+(?:city\s+)?of\s+{re.escape(country)}\b",
+                rf"\bcapital\s+(?:city\s+)?of\s+{re.escape(country)}\s+(?:is|was|became)\s+([a-z]+)\b",
+                rf"\b{re.escape(country)}\'s\s+capital\s+(?:city\s+)?(?:is|was)\s+([a-z]+)\b",
+            ]
+            for cp in contra_pats:
+                m = re.search(cp, e_low)
+                if m:
+                    ev_city = m.group(1).lower().strip()
+                    if ev_city != city and ev_city not in ("the", "a", "its", "state", "territory", "province", "largest", "former", "old"):
+                        return (
+                            EvidenceRelation.CONTRADICTION,
+                            f"Contradicted by {source_name}: Official records establish that {ev_city.capitalize()} is the capital of {country.capitalize()}, not {city.capitalize()}."
+                        )
+
+            # 3. State / Regional distinction: city is capital of a state/province, not the country
+            state_pat = rf"\b{re.escape(city)}\s+is\s+the\s+capital\s+of\s+the\s+(?:state|province|territory|region)\s+of\s+([a-z\s]+)"
+            m_state = re.search(state_pat, e_low)
+            if m_state and country in e_low:
+                st_name = m_state.group(1).split("and")[0].strip().title()
                 return (
-                    EvidenceRelation.DIRECT_SUPPORT,
-                    f"Directly corroborated: {city.capitalize()} is the verified capital of {country.capitalize()}."
+                    EvidenceRelation.CONTRADICTION,
+                    f"Contradicted by {source_name}: Official records document that {city.capitalize()} is the state capital of {st_name}, not the national capital of {country.capitalize()}."
                 )
 
     # 2. Freezing / Boiling point equivalence
@@ -193,9 +232,15 @@ def judge_proposition_against_passage(
 
     # 0. Check Common Fact Equivalence for Primary Propositions
     if internal_type == InternalClaimType.COMMON_FACT and prop.prop_type == "primary":
-        eq_res = evaluate_common_fact_equivalence(claim_text, evidence_snippet)
+        eq_res = evaluate_common_fact_equivalence(claim_text, evidence_snippet, source_name=source_name)
         if eq_res:
             return eq_res
+        # For common facts (e.g. capital cities, freezing/boiling points), if relational equivalence
+        # did not find explicit support or contradiction, do NOT fall through to generic keyword overlap.
+        if "capital" in claim_lower:
+            return EvidenceRelation.INSUFFICIENT, f"Passage in {source_name} does not state that {prop.value} is the capital of {prop.subject}."
+        if any(w in claim_lower for w in ("boil", "freeze", "melting", "speed of light")):
+            return EvidenceRelation.INSUFFICIENT, f"Passage in {source_name} does not confirm the asserted physical constant."
 
     # 1. PRIMARY PROPOSITION EVALUATION
     if prop.prop_type == "primary":
@@ -212,6 +257,14 @@ def judge_proposition_against_passage(
             return EvidenceRelation.INSUFFICIENT, "Insufficient terms in atomic proposition."
 
         matched = [t for t in terms if t in ev_lower]
+
+        # Avoid homonym false positive for "capital" when used in non-geographic/financial sense
+        if "capital" in terms and "capital" in claim_lower:
+            fin_capital = re.findall(r"\b(?:social|venture|working|human|physical)\s+capital\b|\bcapital\s+(?:expenditure|expenditures|investment|investments|gains|assets|goods|punishment|cost|outlay|spending)\b", ev_lower)
+            all_capital = re.findall(r"\bcapital\b", ev_lower)
+            if len(fin_capital) >= len(all_capital):
+                matched = [t for t in matched if t != "capital"]
+
         coverage = len(matched) / len(terms)
 
         subj_words = [w.lower() for w in re.findall(r"\b\w+\b", prop.subject) if len(w) > 2 and w.lower() not in _STOP_WORDS]
@@ -694,11 +747,22 @@ def evaluate_complete_claim_propositions(
         elif prop_eval.supporting_source_names and not prop_eval.contradicting_source_names:
             prop_eval.relation = EvidenceRelation.DIRECT_SUPPORT
         elif prop_eval.supporting_source_names and prop_eval.contradicting_source_names:
-            prop_eval.relation = EvidenceRelation.PARTIAL_SUPPORT
-            prop_eval.rationale = (
-                f"Conflicting evidence: Corroborated by {prop_eval.supporting_source_names[0]}, "
-                f"but discrepancies reported by {prop_eval.contradicting_source_names[0]}."
+            has_authoritative_contra = any(
+                any(ak in s.lower() for ak in ("wikipedia", "wikidata", "official", "encyclop", "britannica", "registry", "institution"))
+                for s in prop_eval.contradicting_source_names
             )
+            has_authoritative_sup = any(
+                any(ak in s.lower() for ak in ("wikipedia", "wikidata", "official", "encyclop", "britannica", "registry", "institution"))
+                for s in prop_eval.supporting_source_names
+            )
+            if has_authoritative_contra and not has_authoritative_sup:
+                prop_eval.relation = EvidenceRelation.CONTRADICTION
+            else:
+                prop_eval.relation = EvidenceRelation.PARTIAL_SUPPORT
+                prop_eval.rationale = (
+                    f"Conflicting evidence: Corroborated by {prop_eval.supporting_source_names[0]}, "
+                    f"but discrepancies reported by {prop_eval.contradicting_source_names[0]}."
+                )
         else:
             prop_eval.relation = EvidenceRelation.INSUFFICIENT
             if not prop_eval.rationale:

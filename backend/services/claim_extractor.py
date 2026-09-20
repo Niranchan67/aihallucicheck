@@ -106,6 +106,99 @@ def _split_sentences(text: str) -> List[str]:
     return sentences
 
 
+_COMPOUND_CONJUNCTION_PATTERN = re.compile(
+    r"(?:;\s*|,\s+(?:and|but|whereas|while|yet)\s+|—\s*|--\s*)",
+    re.IGNORECASE,
+)
+_VERB_HEURISTIC = re.compile(
+    r"\b(?:is|are|was|were|has|have|had|consists?|contains?|includes?|won|invented|created|discovered|died|born|became|ruled|built|wrote|developed|attended|graduated|worked|served|founded|established|signed|published|released|occurred|happens?|happened|causes?|caused|leads?|led)\b|[a-z]{3,}ed\b",
+    re.IGNORECASE,
+)
+
+
+def _split_into_atomic_clauses(sentence: str) -> List[tuple]:
+    """
+    Deconstructs a compound sentence into independent atomic claims.
+    Uses spaCy linguistic dependency analysis when available;
+    falls back to heuristic clause boundary detection with verb verification.
+
+    Returns a list of (atomic_claim_text, rel_start, rel_end).
+    """
+    cuts = []
+
+    if _NLP is not None:
+        try:
+            doc = _NLP(sentence)
+            # 1. Punctuation cuts: semicolons, em dashes
+            for token in doc:
+                if token.text in (';', '—', '--') and 2 < token.i < len(doc) - 2:
+                    left_tokens = doc[:token.i]
+                    right_tokens = doc[token.i + 1:]
+                    if any(t.pos_ in ('VERB', 'AUX') for t in left_tokens) and any(t.pos_ in ('VERB', 'AUX') for t in right_tokens):
+                        cuts.append((token.idx, token.idx + len(token.text)))
+
+            # 2. Conjunction cuts: coordinate and contrast clauses
+            for token in doc:
+                if token.pos_ == 'CCONJ' or (token.pos_ == 'SCONJ' and token.text.lower() in ('while', 'whereas', 'although')):
+                    left_tokens = doc[:token.i]
+                    left_has_verb = any(t.pos_ in ('VERB', 'AUX') for t in left_tokens)
+                    left_has_subj = any(t.dep_ in ('nsubj', 'nsubjpass', 'csubj') for t in left_tokens)
+                    if not (left_has_verb and left_has_subj):
+                        continue
+                    right_verbs = [t for t in doc[token.i + 1:] if t.pos_ in ('VERB', 'AUX')]
+                    for v in right_verbs:
+                        has_subj = any(c.dep_ in ('nsubj', 'nsubjpass', 'csubj') for c in v.children)
+                        if has_subj:
+                            left_idx = token.idx
+                            if token.i > 0 and doc[token.i - 1].text == ',':
+                                left_idx = doc[token.i - 1].idx
+                            cuts.append((left_idx, token.idx + len(token.text)))
+                            break
+        except Exception:
+            cuts = []
+
+    # Regex fallback if spaCy didn't find any cuts
+    if not cuts:
+        for m in _COMPOUND_CONJUNCTION_PATTERN.finditer(sentence):
+            left = sentence[:m.start()]
+            right = sentence[m.end():]
+            if len(left.split()) >= 3 and len(right.split()) >= 3:
+                if _VERB_HEURISTIC.search(left) and _VERB_HEURISTIC.search(right):
+                    cuts.append((m.start(), m.end()))
+
+    if not cuts:
+        return [(sentence.strip(), 0, len(sentence))]
+
+    cuts = sorted(cuts, key=lambda x: x[0])
+    results: List[tuple] = []
+    last_idx = 0
+    for start_cut, end_cut in cuts:
+        raw_chunk = sentence[last_idx:start_cut]
+        trimmed = raw_chunk.strip()
+        if len(trimmed) >= 8:
+            trim_start = last_idx + raw_chunk.find(trimmed)
+            trim_end = trim_start + len(trimmed)
+            clean_stmt = trimmed.rstrip(',; ')
+            if not clean_stmt.endswith('.'):
+                clean_stmt += '.'
+            results.append((clean_stmt, trim_start, trim_end))
+        last_idx = end_cut
+
+    tail_raw = sentence[last_idx:]
+    tail_trimmed = tail_raw.strip()
+    if len(tail_trimmed) >= 8:
+        trim_start = last_idx + tail_raw.find(tail_trimmed)
+        trim_end = trim_start + len(tail_trimmed)
+        clean_stmt = tail_trimmed.lstrip(',; ')
+        if clean_stmt and clean_stmt[0].islower():
+            clean_stmt = clean_stmt[0].upper() + clean_stmt[1:]
+        if not clean_stmt.endswith('.'):
+            clean_stmt += '.'
+        results.append((clean_stmt, trim_start, trim_end))
+
+    return results if results else [(sentence.strip(), 0, len(sentence))]
+
+
 def _classify(sentence: str) -> ClaimType:
     if _OPINION_PATTERN.search(sentence.strip()):
         return ClaimType.OPINION
@@ -120,47 +213,63 @@ def _classify(sentence: str) -> ClaimType:
 
 
 def extract_claims(text: str, max_claims: int = 40) -> List[ExtractedClaim]:
-    """Extract atomic, classified claims from a block of text with character boundary mapping."""
+    """Extract atomic, classified claims from a block of text with character boundary mapping.
+    Compound sentences joined by conjunctions (e.g. 'and', 'but', ';') are deconstructed
+    into discrete atomic claims for independent verification."""
     sentences = _split_sentences(text)
     claims: List[ExtractedClaim] = []
     search_pos = 0
 
     for sentence in sentences:
-        clean = sentence.strip()
-        if len(clean) < 8:
+        clean_sentence = sentence.strip()
+        if len(clean_sentence) < 8:
             # Too short to be a meaningful standalone claim (e.g. stray fragments)
             continue
-        if _BARE_CITATION_FRAGMENT.match(clean):
+        if _BARE_CITATION_FRAGMENT.match(clean_sentence):
             # Just an "Author, A. (Year)." fragment -- the citation itself is
             # already captured separately by extract_citation_strings().
             continue
-        if _CONVERSATIONAL_FILLER.match(clean) and len(clean.split()) < 10:
+        if _CONVERSATIONAL_FILLER.match(clean_sentence) and len(clean_sentence.split()) < 10:
             # Conversational preamble without standalone factual assertions
             continue
 
-        # Map exact character index in original text for the Semantic Highlighting Engine
-        idx = text.find(clean, search_pos)
-        if idx == -1:
-            idx = text.find(clean)
-        start_idx = idx if idx != -1 else 0
-        end_idx = start_idx + len(clean)
-        if idx != -1:
-            search_pos = end_idx
+        # Map exact character index in original text
+        sent_idx = text.find(clean_sentence, search_pos)
+        if sent_idx == -1:
+            sent_idx = text.find(clean_sentence)
+        if sent_idx != -1:
+            search_pos = sent_idx + len(clean_sentence)
+        else:
+            sent_idx = 0
 
-        claim_type = _classify(clean)
-        citation_match = _CITATION_PATTERN.search(clean)
+        # Deconstruct compound sentence into atomic clauses
+        atomic_clauses = _split_into_atomic_clauses(clean_sentence)
 
-        claims.append(
-            ExtractedClaim(
-                id=f"claim-{uuid.uuid4().hex[:8]}",
-                text=clean,
-                type=claim_type,
-                contains_citation=bool(citation_match),
-                citation_text=citation_match.group(1) if citation_match else "",
-                start_index=start_idx,
-                end_index=end_idx,
+        for clause_text, rel_start, rel_end in atomic_clauses:
+            clean_clause = clause_text.strip()
+            if len(clean_clause) < 8:
+                continue
+
+            abs_start = sent_idx + rel_start
+            abs_end = sent_idx + rel_end
+
+            claim_type = _classify(clean_clause)
+            citation_match = _CITATION_PATTERN.search(clean_clause)
+
+            claims.append(
+                ExtractedClaim(
+                    id=f"claim-{uuid.uuid4().hex[:8]}",
+                    text=clean_clause,
+                    type=claim_type,
+                    contains_citation=bool(citation_match),
+                    citation_text=citation_match.group(1) if citation_match else "",
+                    start_index=abs_start,
+                    end_index=abs_end,
+                )
             )
-        )
+            if len(claims) >= max_claims:
+                break
+
         if len(claims) >= max_claims:
             break
 
