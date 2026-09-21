@@ -5,6 +5,14 @@ venv/
 .venv/
 env/
 
+# Build outputs & caches
+dist/
+frontend/dist/
+*.tsbuildinfo
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
 # Python cache
 __pycache__/
 backend/__pycache__/
@@ -17,6 +25,13 @@ backend/__pycache__/
 *.log
 .DS_Store
 Thumbs.db
+
+# Databases
 *.db
 *.sqlite
 *.sqlite3
+
+# Temporary & shortcut artifacts
+*.lnk
+*.temp.html
+test_js.html
