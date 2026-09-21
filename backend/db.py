@@ -15,8 +15,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 def _get_database_url() -> str:
-    if os.getenv("DATABASE_URL"):
-        return os.environ["DATABASE_URL"]
+    url = os.getenv("DATABASE_URL")
+    if url:
+        # Normalize Postgres schemes for SQLAlchemy 2.0 + psycopg2
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+        elif url.startswith("postgresql://") and not url.startswith("postgresql+psycopg2://"):
+            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        return url
     if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
         return "sqlite:////tmp/hallucicheck.db"
     return "sqlite:///./hallucicheck.db"
@@ -24,8 +30,18 @@ def _get_database_url() -> str:
 
 DATABASE_URL = _get_database_url()
 
-_connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=_connect_args)
+if DATABASE_URL.startswith("sqlite"):
+    _connect_args = {"check_same_thread": False}
+    engine = create_engine(DATABASE_URL, connect_args=_connect_args)
+else:
+    # PostgreSQL (Supabase) configuration with automatic ping and connection recycling
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=10,
+        max_overflow=20
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
