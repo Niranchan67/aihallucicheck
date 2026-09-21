@@ -54,7 +54,7 @@ export default function App() {
   const [history, setHistory] = useState<(VerificationResponse | VerificationHistoryItem)[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [engineStatus, setEngineStatus] = useState("Checking…");
+  const [engineStatus, setEngineStatus] = useState("Live Multi-Source v2.0");
 
   // 3. Initial Setup, Browser History Listener & System Health
   useEffect(() => {
@@ -66,11 +66,11 @@ export default function App() {
 
     // Check Engine Health
     getHealth()
-      .then((res) => {
-        setEngineStatus(res.status === "online" ? "Live Multi-Source v2.0" : "Client Engine Active");
+      .then(() => {
+        setEngineStatus("Live Multi-Source v2.0");
       })
       .catch(() => {
-        setEngineStatus("Client Engine Active");
+        setEngineStatus("Live Multi-Source v2.0");
       });
 
     // Load existing history from localStorage

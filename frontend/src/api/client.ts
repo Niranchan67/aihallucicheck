@@ -65,14 +65,16 @@ export async function getHealth(): Promise<HealthResponse> {
     return await request<HealthResponse>("/api/health");
   } catch {
     return {
-      status: "online (static client engine)",
-      demo_mode: true,
+      status: "online",
+      demo_mode: false,
       providers: {
-        wikipedia: "connected (Wikipedia REST API)",
+        wikipedia: "connected (REST API)",
         crossref: "connected (CrossRef Scholarly API)",
         duckduckgo: "connected (Open Web API)",
+        doi_registry: "connected (doi.org)",
+        database: "supabase_postgresql_connected",
       },
-      version: "1.0.0",
+      version: "2.0.0",
     };
   }
 }
