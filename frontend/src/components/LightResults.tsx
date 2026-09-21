@@ -22,15 +22,21 @@ import {
   Scale,
   Quote,
   AlertCircle,
+  ArrowRight,
 } from "lucide-react";
 import type { VerificationResponse, ClaimResult, CitationResult } from "../types";
 
 interface LightResultsProps {
   result: VerificationResponse;
   onVerifyAgain: () => void;
+  onViewDetailedEvidence?: (claimIndex: number) => void;
 }
 
-export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
+export function LightResults({
+  result,
+  onVerifyAgain,
+  onViewDetailedEvidence,
+}: LightResultsProps) {
   const [copied, setCopied] = useState(false);
   const [selectedClaimIndex, setSelectedClaimIndex] = useState<number | null>(0);
   const [activeTab, setActiveTab] = useState<"text" | "claims" | "citations">("text");
@@ -225,10 +231,23 @@ export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
             <span>{copied ? "Copied!" : "Copy"}</span>
           </button>
 
+          {onViewDetailedEvidence && (
+            <button
+              type="button"
+              onClick={() => onViewDetailedEvidence(selectedClaimIndex ?? 0)}
+              className="btn-pill-dark text-xs py-1.5 px-3.5 font-semibold inline-flex items-center gap-1.5 shadow-2xs cursor-pointer hover:bg-slate-800"
+              title="Open Detailed Evidence, Proof & Citations Page"
+            >
+              <BookOpen size={13} />
+              <span>Detailed Evidence</span>
+              <ArrowRight size={12} />
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onVerifyAgain}
-            className="btn-pill-dark text-xs py-1.5 px-4 font-semibold"
+            className="btn-pill-light text-xs py-1.5 px-4 font-semibold"
           >
             <RotateCcw size={13} />
             <span>New Scan</span>
@@ -536,15 +555,29 @@ export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setSelectedClaimIndex(null)}
-                  className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-900 bg-white hover:bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 transition-colors shadow-2xs text-xs font-mono font-bold cursor-pointer"
-                  title="Close inspection card (Esc)"
-                >
-                  <span>✕ Close</span>
-                  <span className="text-[10px] text-slate-400 font-normal">Esc</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {onViewDetailedEvidence && (
+                    <button
+                      type="button"
+                      onClick={() => onViewDetailedEvidence(selectedClaimIndex)}
+                      className="btn-pill-dark px-3.5 py-1 text-xs font-semibold inline-flex items-center gap-1.5 shadow-2xs cursor-pointer hover:bg-slate-800"
+                      title="Open Dedicated Evidence & Proofs Page"
+                    >
+                      <span>Detailed Evidence</span>
+                      <ArrowRight size={12} />
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClaimIndex(null)}
+                    className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-900 bg-white hover:bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 transition-colors shadow-2xs text-xs font-mono font-bold cursor-pointer"
+                    title="Close inspection card (Esc)"
+                  >
+                    <span>✕ Close</span>
+                    <span className="text-[10px] text-slate-400 font-normal">Esc</span>
+                  </button>
+                </div>
               </div>
 
               {/* Exact Tested Statement */}
@@ -795,7 +828,7 @@ export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
                   ))
                 ) : curClaim.source_url ? (
                   <a
-                    href={curClaim.source_url!}
+                    href={curClaim.source_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[11px] text-slate-700 hover:text-slate-950 bg-white hover:bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200 transition-colors shadow-2xs font-medium"
@@ -807,6 +840,26 @@ export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
                   <span className="text-[11px] text-slate-400 font-mono">Synthesized via multi-dataset consensus</span>
                 )}
               </div>
+
+              {/* Detailed Evidence Redirect Banner */}
+              {onViewDetailedEvidence && (
+                <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-white/70 -mx-5 -mb-5 p-4 rounded-b-2xl">
+                  <div className="flex items-center gap-2">
+                    <BookOpen size={14} className="text-slate-600" />
+                    <span className="text-slate-600 text-xs font-medium">
+                      Need ground-truth excerpts, proposition proofs, and valid citations?
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onViewDetailedEvidence(selectedClaimIndex)}
+                    className="btn-pill-dark px-4 py-2 text-xs font-semibold inline-flex items-center gap-2 shadow-xs cursor-pointer hover:bg-slate-800"
+                  >
+                    <span>View Detailed Evidence &amp; Proofs</span>
+                    <ArrowRight size={13} />
+                  </button>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -1042,17 +1095,31 @@ export function LightResults({ result, onVerifyAgain }: LightResultsProps) {
                         )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedClaimIndex(i);
-                          window.scrollTo({ top: 350, behavior: "smooth" });
-                        }}
-                        className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-700 hover:text-slate-950 font-bold bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-full transition-colors cursor-pointer shadow-2xs"
-                      >
-                        <span>Deep Inspect</span>
-                        <ChevronRight size={11} />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {onViewDetailedEvidence && (
+                          <button
+                            type="button"
+                            onClick={() => onViewDetailedEvidence(i)}
+                            className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-800 hover:text-slate-950 font-bold bg-white hover:bg-slate-100 px-3 py-1 rounded-full border border-slate-200 transition-colors cursor-pointer shadow-2xs"
+                            title="Open detailed evidence, proof & citations page"
+                          >
+                            <span>Detailed Evidence</span>
+                            <ArrowRight size={11} />
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedClaimIndex(i);
+                            window.scrollTo({ top: 350, behavior: "smooth" });
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-700 hover:text-slate-950 font-bold bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-full transition-colors cursor-pointer shadow-2xs"
+                        >
+                          <span>Deep Inspect</span>
+                          <ChevronRight size={11} />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );

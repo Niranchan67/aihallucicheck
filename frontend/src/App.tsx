@@ -6,6 +6,7 @@ import { HomeCoverView } from "./components/HomeCoverView";
 import { LightConsole } from "./components/LightConsole";
 import { LightResults } from "./components/LightResults";
 import { LightHistory } from "./components/LightHistory";
+import { DetailedEvidenceView } from "./components/DetailedEvidenceView";
 import { BarChart3, ArrowRight, Terminal } from "lucide-react";
 import type {
   AppTab,
@@ -27,7 +28,8 @@ export default function App() {
         hash === "workspace" ||
         hash === "dashboard" ||
         hash === "history" ||
-        hash === "home"
+        hash === "home" ||
+        hash === "evidence"
       ) {
         return hash as AppTab;
       }
@@ -55,6 +57,14 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [engineStatus, setEngineStatus] = useState("Live Multi-Source v2.0");
+  const [selectedEvidenceClaimIndex, setSelectedEvidenceClaimIndex] = useState<number>(0);
+
+  const handleViewDetailedEvidence = (claimIndex?: number) => {
+    if (typeof claimIndex === "number") {
+      setSelectedEvidenceClaimIndex(claimIndex);
+    }
+    handleNavigate("evidence");
+  };
 
   // 3. Initial Setup, Browser History Listener & System Health
   useEffect(() => {
@@ -280,6 +290,7 @@ export default function App() {
                   setText("");
                   handleNavigate("workspace");
                 }}
+                onViewDetailedEvidence={handleViewDetailedEvidence}
               />
             ) : (
               <div className="glass-card-light rounded-3xl p-10 sm:p-16 text-center space-y-6 max-w-xl mx-auto border border-slate-200 shadow-sm mt-8">
@@ -317,6 +328,20 @@ export default function App() {
             onDeleteAudit={handleDeleteAudit}
             onClearAllHistory={handleClearAllHistory}
             onNavigate={handleNavigate}
+          />
+        )}
+
+        {/* VIEW 5: DETAILED EVIDENCE, PROOFS & VALID CITATIONS */}
+        {activeTab === "evidence" && (
+          <DetailedEvidenceView
+            result={activeResult}
+            selectedClaimIndex={selectedEvidenceClaimIndex}
+            onSelectClaim={(idx) => setSelectedEvidenceClaimIndex(idx)}
+            onBack={() => handleNavigate("dashboard")}
+            onVerifyAgain={() => {
+              setText("");
+              handleNavigate("workspace");
+            }}
           />
         )}
       </main>
