@@ -10,6 +10,11 @@ changing any other code.
 """
 
 import os
+from dotenv import load_dotenv
+
+# Ensure .env is loaded
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+load_dotenv()
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker

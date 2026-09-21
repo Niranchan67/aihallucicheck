@@ -71,13 +71,14 @@ if not os.path.exists(_frontend_dist_check):
 
 @app.get("/api/health", response_model=HealthResponse)
 def health_check():
+    db_type = "supabase_postgresql_connected" if "postgres" in os.getenv("DATABASE_URL", "").lower() else "sqlite_connected"
     providers = {
         "wikipedia": "connected (REST API)",
         "duckduckgo": "connected (Web Search)",
         "crossref": "connected (Scholarly Index)",
         "doi_registry": "connected (doi.org)",
         "gemini": "connected" if os.getenv("GEMINI_API_KEY") else "fallback_semantic_engine",
-        "database": "sqlite_connected",
+        "database": db_type,
     }
     return HealthResponse(
         status="online",

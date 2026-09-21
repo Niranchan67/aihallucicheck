@@ -12,6 +12,14 @@ Or configure DATABASE_URL in backend/.env and run:
 
 import os
 import sys
+
+# Ensure UTF-8 output on Windows consoles
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -21,10 +29,10 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "backend", ".env"))
 
 # Import database models
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend"))
-from models import Base, VerificationReport, Claim, Citation
+from models import Base, ReportORM, ClaimORM, CitationORM
 
 def get_target_url():
-    if len(sys.argv) > 1 and sys.argv[1].startswith("postgres"):
+    if len(sys.argv) > 1 and "postgres" in sys.argv[1]:
         return sys.argv[1]
     env_url = os.getenv("DATABASE_URL")
     if env_url and "postgres" in env_url:
@@ -35,9 +43,6 @@ def main():
     target_url = get_target_url()
     if not target_url:
         print("\n[ERROR] No Supabase PostgreSQL URL provided.")
-        print("Please provide your connection string:")
-        print("  py migrate_to_supabase.py \"postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres\"")
-        print("Or add DATABASE_URL=... in backend/.env\n")
         sys.exit(1)
 
     # Normalize url scheme
@@ -61,42 +66,45 @@ def main():
     sqlite_session = SQLiteSession()
 
     # Connect to Supabase Postgres
-    print(f"Connecting to Supabase at: {target_url.split('@')[-1] if '@' in target_url else 'PostgreSQL'}...")
+    host_display = target_url.split('@')[-1].split('/')[0] if '@' in target_url else 'Supabase'
+    print(f"Connecting to Supabase at: {host_display}...")
     try:
         supabase_engine = create_engine(target_url, pool_pre_ping=True)
-        # Create tables on Supabase if not exist
+        # Create tables on Supabase if they don't exist
         Base.metadata.create_all(bind=supabase_engine)
         SupabaseSession = sessionmaker(bind=supabase_engine)
         supabase_session = SupabaseSession()
-        print("✅ Supabase tables verified and initialized successfully.")
+        print("✅ Supabase tables ('verification_reports', 'claims', 'citations') verified and initialized.")
     except Exception as e:
         print(f"❌ Failed to connect to Supabase: {e}")
         sys.exit(1)
 
     try:
         # Fetch SQLite data
-        reports = sqlite_session.query(VerificationReport).all()
-        claims = sqlite_session.query(Claim).all()
-        citations = sqlite_session.query(Citation).all()
+        reports = sqlite_session.query(ReportORM).all()
+        claims = sqlite_session.query(ClaimORM).all()
+        citations = sqlite_session.query(CitationORM).all()
 
         print(f"\nFound in SQLite: {len(reports)} Reports, {len(claims)} Claims, {len(citations)} Citations.")
 
         # Migrate Reports
         print("Migrating verification reports...")
         for r in reports:
-            existing = supabase_session.query(VerificationReport).filter_by(verification_id=r.verification_id).first()
+            existing = supabase_session.query(ReportORM).filter_by(verification_id=r.verification_id).first()
             if not existing:
-                new_r = VerificationReport(
+                new_r = ReportORM(
                     id=r.id,
                     verification_id=r.verification_id,
                     created_at=r.created_at,
+                    input_text=r.input_text,
                     model=r.model,
                     overall_confidence=r.overall_confidence,
                     claims_checked=r.claims_checked,
                     verified_count=r.verified_count,
                     suspicious_count=r.suspicious_count,
                     hallucinated_count=r.hallucinated_count,
-                    raw_json=r.raw_json
+                    demo_mode=r.demo_mode,
+                    result_json=r.result_json
                 )
                 supabase_session.merge(new_r)
 
@@ -106,18 +114,13 @@ def main():
         # Migrate Claims
         print("Migrating atomic claims...")
         for c in claims:
-            new_c = Claim(
+            new_c = ClaimORM(
                 id=c.id,
                 report_id=c.report_id,
-                text=c.text,
-                type=c.type,
+                claim_text=c.claim_text,
                 status=c.status,
                 confidence=c.confidence,
-                evidence=c.evidence,
-                source_url=c.source_url,
-                reasoning=c.reasoning,
-                start_index=c.start_index,
-                end_index=c.end_index
+                evidence=c.evidence
             )
             supabase_session.merge(new_c)
 
@@ -128,13 +131,11 @@ def main():
         if citations:
             print("Migrating citations...")
             for cit in citations:
-                new_cit = Citation(
+                new_cit = CitationORM(
                     id=cit.id,
                     report_id=cit.report_id,
-                    doi=cit.doi,
-                    title=cit.title,
-                    authors=cit.authors,
-                    year=cit.year,
+                    citation_text=cit.citation_text,
+                    status=cit.status,
                     url=cit.url
                 )
                 supabase_session.merge(new_cit)
@@ -142,7 +143,7 @@ def main():
             print(f"✅ Migrated {len(citations)} citations.")
 
         print("\n🎉 [SUCCESS] Migration complete! All data is now live on Supabase.")
-        print("To switch your application to Supabase permanently, set DATABASE_URL in backend/.env\n")
+        print("Your application is now backed by cloud PostgreSQL on Supabase.\n")
 
     except Exception as e:
         supabase_session.rollback()
