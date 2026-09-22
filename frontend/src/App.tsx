@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getHealth, verifyContent, getVerification } from "./api/client";
-import { getStoredVerificationResult, parseTextToVerification } from "./api/mockDataParser";
+import { getStoredVerificationResult, parseTextToVerification, parseTextToVerificationAsync } from "./api/mockDataParser";
 import { HeaderBar } from "./components/HeaderBar";
 import { HomeCoverView } from "./components/HomeCoverView";
 import { LightConsole } from "./components/LightConsole";
@@ -152,7 +152,7 @@ export default function App() {
       setIsProcessing(false);
       // Resilient client-side multi-source analysis fallback
       try {
-        const fallbackData = parseTextToVerification(payload.text, payload.model || model);
+        const fallbackData = await parseTextToVerificationAsync(payload.text, payload.model || model);
         setActiveResult(fallbackData);
         localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(fallbackData));
         setHistory((prev) => [fallbackData, ...prev].slice(0, 50));

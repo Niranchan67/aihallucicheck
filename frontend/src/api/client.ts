@@ -5,7 +5,7 @@ import type {
   VerificationRequest,
   VerificationResponse,
 } from "../types";
-import { parseTextToVerification } from "./mockDataParser";
+import { parseTextToVerification, parseTextToVerificationAsync } from "./mockDataParser";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE !== undefined
@@ -141,7 +141,7 @@ export async function deleteVerification(id: string): Promise<{ deleted: boolean
 }
 
 async function runClientFallbackVerification(payload: VerificationRequest): Promise<VerificationResponse> {
-  const result = parseTextToVerification(payload.text, payload.model || "chatgpt");
+  const result = await parseTextToVerificationAsync(payload.text, payload.model || "chatgpt");
   saveLocalVerification(result);
   return result;
 }
