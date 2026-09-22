@@ -141,6 +141,70 @@ export async function fetchLiveAuthoritativeEvidence(statement: string): Promise
             });
           }
         }),
+
+      // 5. NCBI Entrez / PubMed Biomedical Registry (National Institutes of Health / NLM)
+      fetch(
+        `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodeURIComponent(cleanQuery)}&retmode=json&retmax=1`,
+        { signal: timeoutSignal }
+      )
+        .then((res) => res.json())
+        .then((data) => {
+          const pmid = data.esearchresult?.idlist?.[0];
+          if (pmid) {
+            results.push({
+              sourceName: `PubMed (NLM/NIH): PMID ${pmid}`,
+              sourceUrl: `https://pubmed.ncbi.nlm.nih.gov/${pmid}`,
+              title: `PubMed Biomedical Record ${pmid}`,
+              excerpt: `Biomedical and life sciences reference indexed in the US National Library of Medicine (PMID: ${pmid}).`,
+              doi: null,
+              authorityTier: 0.97,
+              authorityLabel: "National Library of Medicine (NIH)",
+              dataset: "PubMed Biomedical Index",
+            });
+          }
+        }),
+
+      // 6. DataCite Global Research Repository & DOI Registry (50M+ Records)
+      fetch(`https://api.datacite.org/dois?query=${encodeURIComponent(cleanQuery)}&page[size]=1`, { signal: timeoutSignal })
+        .then((res) => res.json())
+        .then((data) => {
+          const item = data.data?.[0]?.attributes;
+          if (item && item.titles?.[0]?.title) {
+            const doi = item.doi;
+            const publisher = item.publisher || "Global Research Consortium";
+            results.push({
+              sourceName: `DataCite: ${publisher}`,
+              sourceUrl: doi ? `https://doi.org/${doi}` : `https://search.datacite.org/works?query=${encodeURIComponent(cleanQuery)}`,
+              title: item.titles[0].title,
+              excerpt: `Curated scientific dataset/publication from ${publisher}: "${item.titles[0].title}"`,
+              doi: doi ? `https://doi.org/${doi}` : null,
+              authorityTier: 0.95,
+              authorityLabel: "International DataCite Consortium",
+              dataset: "DataCite Research Index",
+            });
+          }
+        }),
+
+      // 7. DOAJ (Directory of Open Access Journals - 10M+ Peer-Reviewed Articles)
+      fetch(`https://doaj.org/api/search/articles/${encodeURIComponent(cleanQuery)}?pageSize=1`, { signal: timeoutSignal })
+        .then((res) => res.json())
+        .then((data) => {
+          const item = data.results?.[0]?.bibjson;
+          if (item && item.title) {
+            const doiObj = item.identifier?.find((id: any) => id.type?.toLowerCase() === "doi");
+            const journal = item.journal?.title || "Peer-Reviewed Open Journal";
+            results.push({
+              sourceName: `DOAJ: ${journal}`,
+              sourceUrl: doiObj?.id ? `https://doi.org/${doiObj.id}` : `https://doaj.org/article/${item.id || ""}`,
+              title: item.title,
+              excerpt: `Peer-reviewed open access paper in ${journal}: "${item.title}"`,
+              doi: doiObj?.id ? `https://doi.org/${doiObj.id}` : null,
+              authorityTier: 0.94,
+              authorityLabel: "Directory of Open Access Journals",
+              dataset: "DOAJ Curated Index",
+            });
+          }
+        }),
     ]);
   } catch {
     // Graceful fallback if network is restricted
@@ -802,7 +866,7 @@ function buildVerificationResponse(
     stages: [
       "Claim Extraction",
       "Coordinate Clause Decomposition",
-      "Multi-Source Quorum Gathering (Wikipedia, Wikidata, OpenAlex, CrossRef)",
+      "Multi-Source Quorum Gathering (Wikipedia, Wikidata, OpenAlex, CrossRef, PubMed, DataCite, DOAJ)",
       "URL & DOI Validation",
       "Proposition-Level Entailment",
       "Contradiction Detection",

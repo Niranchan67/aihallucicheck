@@ -7,10 +7,12 @@ Retrieves ground-truth evidence across independent authoritative repositories:
 1. OpenAlex API (250M+ scholarly works from Nature, Science, IEEE, Springer, ACM)
 2. CrossRef REST API (official scholarly DOI registry & metadata)
 3. Europe PMC / PubMed Central (NIH, medical, life sciences, clinical)
-4. ArXiv API (Cornell University scientific & computer science archive)
-5. Live Web Search (DuckDuckGo live internet search for .gov, .edu, reputable news, primary documents)
-6. Wikidata Structured Knowledge API (structured factual triples & descriptions)
-7. Wikipedia REST API (used strictly as secondary reference discovery, NEVER primary ground truth)
+4. DataCite Global Registry (50M+ datasets & scientific publications)
+5. DOAJ (Directory of Open Access Journals - 10M+ peer-reviewed articles)
+6. ArXiv API (Cornell University scientific & computer science archive)
+7. Live Web Search (DuckDuckGo live internet search for .gov, .edu, reputable news, primary documents)
+8. Wikidata Structured Knowledge API (structured factual triples & descriptions)
+9. Wikipedia REST API (used strictly as secondary reference discovery, NEVER primary ground truth)
 
 FEATURES:
 - Active contradiction search integration.
@@ -266,6 +268,103 @@ async def fetch_arxiv_evidence(query: str, max_results: int = 1) -> List[Retriev
 
 
 # --------------------------------------------------------------------------
+# 4b. DataCite Global Research Repository (50M+ Datasets & Scholarly Outputs)
+# --------------------------------------------------------------------------
+async def fetch_datacite_evidence(query: str, max_results: int = 2) -> List[RetrievedEvidence]:
+    results: List[RetrievedEvidence] = []
+    clean_query = re.sub(r'[^\w\s]', ' ', query).strip()
+    if not clean_query:
+        return results
+
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            url = "https://api.datacite.org/dois"
+            params = {"query": clean_query, "page[size]": max_results}
+            resp = await client.get(url, params=params)
+            if resp.status_code == 200:
+                data = resp.json().get("data", [])
+                for item in data:
+                    attrs = item.get("attributes", {})
+                    titles = attrs.get("titles", [])
+                    title = titles[0].get("title", "") if titles else ""
+                    doi = attrs.get("doi")
+                    publisher = attrs.get("publisher") or "DataCite Consortium"
+                    pub_year = str(attrs.get("publicationYear", ""))
+                    landing_url = f"https://doi.org/{doi}" if doi else "https://datacite.org"
+                    descriptions = attrs.get("descriptions", [])
+                    desc = descriptions[0].get("description", "") if descriptions else ""
+                    clean_desc = re.sub(r'<[^>]+>', '', desc).strip()
+                    snippet = clean_desc[:350] if clean_desc else f"Research data record: {title} published by {publisher}."
+
+                    if title:
+                        results.append(
+                            RetrievedEvidence(
+                                source_name=f"{publisher} (DataCite)",
+                                source_url=landing_url,
+                                title=title,
+                                snippet=snippet,
+                                source_domain=_extract_domain(landing_url),
+                                publication_year=pub_year,
+                                is_secondary=False,
+                            )
+                        )
+    except Exception as e:
+        print(f"[multi_source_retriever] DataCite notice: {e}")
+
+    return results
+
+
+# --------------------------------------------------------------------------
+# 4c. DOAJ (Directory of Open Access Journals - 10M+ Peer-Reviewed Articles)
+# --------------------------------------------------------------------------
+async def fetch_doaj_evidence(query: str, max_results: int = 2) -> List[RetrievedEvidence]:
+    results: List[RetrievedEvidence] = []
+    clean_query = re.sub(r'[^\w\s]', ' ', query).strip()
+    if not clean_query:
+        return results
+
+    try:
+        async with httpx.AsyncClient(timeout=6.0, follow_redirects=True) as client:
+            url = f"https://doaj.org/api/search/articles/{urllib.parse.quote(clean_query)}"
+            params = {"pageSize": max_results}
+            resp = await client.get(url, params=params)
+            if resp.status_code == 200:
+                items = resp.json().get("results", [])
+                for item in items:
+                    bib = item.get("bibjson", {})
+                    title = bib.get("title", "")
+                    journal_info = bib.get("journal", {})
+                    journal = journal_info.get("title") or "Peer-Reviewed Open Access Journal"
+                    year = str(bib.get("year", ""))
+                    abstract = bib.get("abstract", "")
+                    doi_id = None
+                    for ident in bib.get("identifier", []):
+                        if ident.get("type", "").lower() == "doi":
+                            doi_id = ident.get("id")
+                            break
+
+                    landing_url = f"https://doi.org/{doi_id}" if doi_id else f"https://doaj.org/article/{item.get('id', '')}"
+                    snippet = abstract[:350] if abstract else f"Peer-reviewed article: {title} in {journal}."
+
+                    if title:
+                        results.append(
+                            RetrievedEvidence(
+                                source_name=f"{journal} (DOAJ)",
+                                source_url=landing_url,
+                                title=title,
+                                snippet=snippet,
+                                source_domain=_extract_domain(landing_url),
+                                publication_year=year,
+                                is_secondary=False,
+                            )
+                        )
+    except Exception as e:
+        print(f"[multi_source_retriever] DOAJ notice: {e}")
+
+    return results
+
+
+# --------------------------------------------------------------------------
 # 5. Live Web Search (DuckDuckGo Live HTML & Instant Answers for .gov, .edu, News)
 # --------------------------------------------------------------------------
 async def fetch_live_web_evidence(query: str, max_results: int = 4) -> List[RetrievedEvidence]:
@@ -488,6 +587,8 @@ async def retrieve_multi_source_evidence(
         fetch_openalex_evidence(query, max_results=2),
         fetch_crossref_evidence(query, max_results=2),
         fetch_pubmed_evidence(query, max_results=2),
+        fetch_datacite_evidence(query, max_results=2),
+        fetch_doaj_evidence(query, max_results=2),
         fetch_arxiv_evidence(query, max_results=1),
         fetch_wikipedia_evidence(query, max_results=2),  # Secondary
     ]
