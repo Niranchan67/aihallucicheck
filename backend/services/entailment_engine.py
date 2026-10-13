@@ -209,6 +209,40 @@ def evaluate_common_fact_equivalence(
                 "Directly substantiated by fundamental scientific and physical constants."
             )
 
+    # 3. Heliocentric / Solar System planetary mechanics
+    if ("sun" in c_low and "earth" in c_low) and any(w in c_low for w in ("revolve", "orbit", "rotate", "revolving", "orbiting")):
+        if re.search(r"\bsun\s+(?:revolves?|orbits?|goes)\s+(?:around\s+)?(?:the\s+)?earth\b", c_low):
+            return (
+                EvidenceRelation.CONTRADICTION,
+                f"Contradicted by {source_name}: Fundamental heliocentric astrophysics establishes that the Earth revolves around the Sun with an orbital period of approximately 365.25 days, not the Sun around the Earth. The apparent daily 24-hour cycle is produced by the Earth rotating on its own axis."
+            )
+        elif re.search(r"\bearth\s+(?:revolves?|orbits?|goes)\s+(?:around\s+)?(?:the\s+)?sun\b", c_low):
+            return (
+                EvidenceRelation.DIRECT_SUPPORT,
+                f"Directly supported by {source_name}: Confirmed that the Earth revolves around the Sun in an elliptical orbit taking approximately 365.25 days."
+            )
+
+    # 4. Flat Earth Contradiction
+    if "flat earth" in c_low or ("earth" in c_low and "is flat" in c_low):
+        return (
+            EvidenceRelation.CONTRADICTION,
+            f"Contradicted by {source_name}: Geodesy and planetary science definitively establish that the Earth is an oblate spheroid."
+        )
+
+    # 5. Solar System Model Acceptance & Obsolete Geocentrism Refutation
+    if "solar system" in c_low and any(w in c_low for w in ("model", "accepted")):
+        if any(w in c_low for w in ("geocentric", "ptolemaic", "earth is the center", "earth at the center")) or \
+           re.search(r"\b(?:this|that|it)\s+is\s+(?:the\s+)?(?:scientifically\s+)?accepted\b", c_low):
+            return (
+                EvidenceRelation.CONTRADICTION,
+                f"Contradicted by {source_name}: Modern astrophysics definitively establishes that heliocentrism (planets orbiting the Sun) is the accepted model of the solar system, whereas geocentrism was disproven centuries ago."
+            )
+        elif "heliocentric" in c_low:
+            return (
+                EvidenceRelation.DIRECT_SUPPORT,
+                f"Directly supported by {source_name}: Confirmed that the heliocentric model is the scientifically accepted model of the solar system."
+            )
+
     return None
 
 

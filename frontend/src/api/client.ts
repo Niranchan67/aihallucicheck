@@ -45,6 +45,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw err;
   }
 
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const err: ApiError = {
+      status: res.status,
+      message: "Non-JSON response received from server. Falling back to multi-source consensus.",
+    };
+    throw err;
+  }
+
   return (await res.json()) as T;
 }
 

@@ -75,13 +75,15 @@ class AnalyzedClaim:
 # Common facts patterns and indicators
 _COMMON_FACT_TRIGGERS = [
     r"\b(?:capital of|capital city|capital|currency of|currency|largest ocean|planet in the solar system)\b",
-    r"\b(?:orbits the sun|freezes at|boils at|water is made of|speed of light|formula for water|chemical symbol for)\b",
+    r"\b(?:orbits the sun|orbits the earth|revolves around|revolves around the sun|revolves around the earth|freezes at|boils at|water is made of|speed of light|formula for water|chemical symbol for)\b",
 ]
 
 _SCIENTIFIC_KEYWORDS = {
     "molecule", "atom", "quantum", "dna", "rna", "protein", "cell", "velocity",
     "acceleration", "gravity", "species", "photosynthesis", "electron", "proton",
     "neutron", "element", "chemical", "physics", "biology", "thermodynamics",
+    "sun", "earth", "orbit", "revolve", "astronomy", "planet", "celestial",
+    "heliocentric", "geocentric", "rotation",
 }
 
 _OPINION_MARKERS = [
