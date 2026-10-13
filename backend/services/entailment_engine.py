@@ -243,6 +243,19 @@ def evaluate_common_fact_equivalence(
                 f"Directly supported by {source_name}: Confirmed that the heliocentric model is the scientifically accepted model of the solar system."
             )
 
+    # 6. Indian Independence Chronology
+    if "india" in c_low and ("independence" in c_low or "independent" in c_low):
+        if "1950" in c_low or any(y in c_low for y in ("1948", "1949", "1951", "1952")):
+            return (
+                EvidenceRelation.CONTRADICTION,
+                f"Contradicted by {source_name}: India gained independence on 15 August 1947 under the Indian Independence Act 1947. 26 January 1950 marks Republic Day, when the Constitution of India came into effect."
+            )
+        elif "1947" in c_low:
+            return (
+                EvidenceRelation.DIRECT_SUPPORT,
+                f"Directly supported by {source_name}: Confirmed that India gained independence on 15 August 1947."
+            )
+
     return None
 
 
