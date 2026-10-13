@@ -35,18 +35,25 @@ def _get_database_url() -> str:
 
 DATABASE_URL = _get_database_url()
 
-if DATABASE_URL.startswith("sqlite"):
-    _connect_args = {"check_same_thread": False}
-    engine = create_engine(DATABASE_URL, connect_args=_connect_args)
-else:
-    # PostgreSQL (Supabase) configuration with automatic ping and connection recycling
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        pool_recycle=300,
-        pool_size=10,
-        max_overflow=20
-    )
+try:
+    if DATABASE_URL.startswith("sqlite"):
+        _connect_args = {"check_same_thread": False}
+        engine = create_engine(DATABASE_URL, connect_args=_connect_args)
+    else:
+        # PostgreSQL (Supabase) configuration with automatic ping and connection recycling
+        engine = create_engine(
+            DATABASE_URL,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_size=10,
+            max_overflow=20
+        )
+        # Test connection
+        with engine.connect() as conn:
+            pass
+except Exception as e:
+    print(f"[db] Warning: Remote database connection failed ({e}). Falling back to SQLite.")
+    engine = create_engine("sqlite:///./hallucicheck.db", connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

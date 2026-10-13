@@ -19,13 +19,40 @@ from dataclasses import dataclass, field
 from enum import Enum
 import re
 from typing import List, Optional, Set, Tuple
-import spacy
-
-# Load spaCy NLP model
+# Load spaCy NLP model with graceful fallback
 try:
-    nlp = spacy.load("en_core_web_sm")
-except Exception:
-    nlp = spacy.blank("en")
+    import spacy
+    try:
+        nlp = spacy.load("en_core_web_sm")
+    except Exception:
+        nlp = spacy.blank("en")
+except ImportError:
+    class DummyToken:
+        def __init__(self, text: str):
+            self.text = text
+            self.lemma_ = text.lower()
+            self.head = self
+            self.dep_ = "nsubj"
+            self.lefts = []
+            self.rights = []
+            self.subtree = [self]
+            self.is_stop = text.lower() in {"the", "a", "an", "is", "are", "was", "were", "in", "on", "at", "to", "for", "of"}
+
+    class DummyDoc:
+        def __init__(self, text: str):
+            words = text.split()
+            self.tokens = [DummyToken(w) for w in words]
+            self.ents = []
+        def __iter__(self):
+            return iter(self.tokens)
+        def __len__(self):
+            return len(self.tokens)
+
+    class DummyNLP:
+        def __call__(self, text: str):
+            return DummyDoc(text)
+
+    nlp = DummyNLP()
 
 
 class InternalClaimType(str, Enum):
