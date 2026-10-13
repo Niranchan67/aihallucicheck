@@ -55,6 +55,18 @@ except ImportError:
     nlp = DummyNLP()
 
 
+_STOP_WORDS = {
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "in", "on", "at", "to", "for", "with", "by", "about", "against", "between",
+    "into", "through", "during", "before", "after", "above", "below", "from",
+    "up", "down", "out", "over", "under", "again", "further", "then",
+    "once", "here", "there", "when", "where", "why", "how", "all", "any",
+    "both", "each", "few", "more", "most", "other", "some", "such", "no",
+    "nor", "not", "only", "own", "same", "so", "than", "too", "very", "can",
+    "will", "just", "don", "should", "now", "it", "its", "that", "this", "these", "those"
+}
+
+
 class InternalClaimType(str, Enum):
     COMMON_FACT = "COMMON_FACT"                  # Basic general knowledge ("Paris is the capital of France")
     SPECIFIC_FACT = "SPECIFIC_FACT"              # Specific event or record ("SpaceX launched Falcon Heavy in 2018")
@@ -338,6 +350,28 @@ def decompose_claim_into_atomic_propositions(claim_text: str) -> Tuple[str, str,
                 )
             )
             covered_years.add(yr)
+
+    # Secondary entities (e.g. wars, targets, organizations mentioned in sentence)
+    covered_entities = {q.value.lower() for q in qualifiers}
+    if subj_str:
+        covered_entities.add(subj_str.lower())
+    for ent in entities:
+        if ent.lower() not in covered_entities and ent not in covered_years and len(ent) > 2:
+            ent_terms = {w.lower() for w in re.findall(r"\b\w+\b", ent) if w.lower() not in _STOP_WORDS}
+            if ent_terms:
+                qualifiers.append(
+                    AtomicProposition(
+                        prop_type="target_entity",
+                        statement=f"The event is historically or conceptually associated with: '{ent}'",
+                        raw_phrase=ent,
+                        subject=subj_str,
+                        relation="associated_entity",
+                        value=ent,
+                        content_terms=ent_terms,
+                        is_material=True,
+                    )
+                )
+                covered_entities.add(ent.lower())
 
     # Primary Proposition: Subject -> Action -> Object
     primary_terms = set()

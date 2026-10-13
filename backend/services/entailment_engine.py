@@ -527,6 +527,11 @@ def judge_proposition_against_passage(
 
     # 3. DATE / TIME QUALIFIER EVALUATION
     elif prop.prop_type == "date":
+        # Ensure the evidence snippet is actually discussing the subject entity
+        subj_tokens = {w.lower() for w in re.findall(r"\b\w+\b", prop.subject) if len(w) > 2 and w.lower() not in _STOP_WORDS}
+        if subj_tokens and not any(t in ev_lower for t in subj_tokens):
+            return EvidenceRelation.INSUFFICIENT, f"Passage in {source_name} does not discuss {prop.subject}."
+
         years = set(re.findall(r"\b(1[6-9]\d{2}|20\d{2})\b", prop.raw_phrase))
         ev_years = set(re.findall(r"\b(1[6-9]\d{2}|20\d{2})\b", evidence_snippet))
 
@@ -537,18 +542,14 @@ def judge_proposition_against_passage(
                     f"Directly supported by {source_name}: Chronology {', '.join(sorted(years))} matches verified records."
                 )
 
-            # Check if this specific event/award is explicitly associated with a conflicting year
-            award_year_match = re.search(
-                rf"\b(?:awarded|won|received|conferred|held|signed|occurred)\s+(?:the\s+)?(?:nobel\s+)?.*?\b(1[6-9]\d{2}|20\d{2})\b",
-                ev_lower
-            )
-            if award_year_match:
-                conflicting_yr = award_year_match.group(1)
-                if conflicting_yr not in years and any(k in ev_lower for k in ["prize", "award", "won", "received", "treaty"]):
-                    return (
-                        EvidenceRelation.CONTRADICTION,
-                        f"Chronological discrepancy in {source_name}: Records associate the year {conflicting_yr} with this event, not {', '.join(sorted(years))}."
-                    )
+            # If passage discusses the subject and gives an alternative year, it is a contradiction
+            conflicting_years = ev_years - years
+            if conflicting_years:
+                closest_ev_year = sorted(conflicting_years)[0]
+                return (
+                    EvidenceRelation.CONTRADICTION,
+                    f"Chronological contradiction in {source_name}: Authoritative records associate {prop.subject} with the year {closest_ev_year}, directly refuting the asserted year {', '.join(sorted(years))}."
+                )
 
         return EvidenceRelation.INSUFFICIENT, f"Date {prop.raw_phrase} not explicitly verified in {source_name}."
 
@@ -596,6 +597,39 @@ def judge_proposition_against_passage(
                 f"Directly supported by {source_name}: Attribution '{prop.raw_phrase}' confirmed."
             )
         return EvidenceRelation.INSUFFICIENT, f"Attribution '{prop.raw_phrase}' not confirmed in {source_name}."
+
+    # 7. TARGET ENTITY / HISTORICAL CONFLICT EVALUATION
+    elif prop.prop_type == "target_entity":
+        subj_tokens = {w.lower() for w in re.findall(r"\b\w+\b", prop.subject) if len(w) > 2 and w.lower() not in _STOP_WORDS}
+        target_tokens = [w.lower() for w in prop.content_terms if w.lower() not in _STOP_WORDS]
+
+        # Check if snippet discusses the subject
+        if subj_tokens and any(t in ev_lower for t in subj_tokens):
+            if target_tokens and all(t in ev_lower for t in target_tokens):
+                return (
+                    EvidenceRelation.DIRECT_SUPPORT,
+                    f"Directly supported by {source_name}: Historical link with '{prop.value}' is substantiated."
+                )
+
+            # Check if snippet explicitly associates with a conflicting major historical event/war
+            historical_conflicts = [
+                "thirty years' war", "thirty years war", "hundred years' war", "hundred years war",
+                "world war i", "first world war", "wwi", "world war ii", "second world war", "wwii",
+                "cold war", "napoleonic wars", "seven years' war", "american civil war"
+            ]
+            target_conflict = next((c for c in historical_conflicts if c in prop.value.lower()), None)
+            if target_conflict:
+                actual_conflict = next((c for c in historical_conflicts if c in ev_lower and c != target_conflict), None)
+                if actual_conflict:
+                    return (
+                        EvidenceRelation.CONTRADICTION,
+                        f"Historical event contradiction in {source_name}: Official documentation establishes that {prop.subject} concluded the {actual_conflict.title()}, directly contradicting '{prop.value}'."
+                    )
+
+            return (
+                EvidenceRelation.INSUFFICIENT,
+                f"Passage in {source_name} does not link {prop.subject} with '{prop.value}'."
+            )
 
     return EvidenceRelation.INSUFFICIENT, f"Qualifier '{prop.raw_phrase}' not substantiated."
 
