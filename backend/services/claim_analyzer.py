@@ -102,7 +102,7 @@ class AnalyzedClaim:
 # Common facts patterns and indicators
 _COMMON_FACT_TRIGGERS = [
     r"\b(?:capital of|capital city|capital|currency of|currency|largest ocean|planet in the solar system)\b",
-    r"\b(?:orbits the sun|orbits the earth|revolves around|revolves around the sun|revolves around the earth|freezes at|boils at|water is made of|speed of light|formula for water|chemical symbol for)\b",
+    r"\b(?:orbits the sun|orbits the earth|revolves around|revolves around the sun|revolves around the earth|freezes at|boils at|water is made of|speed of light|formula for water|chemical symbol for|specific heat|heat capacity|entanglement|faster-than-light|faster than light|superluminal)\b",
 ]
 
 _SCIENTIFIC_KEYWORDS = {

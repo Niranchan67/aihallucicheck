@@ -632,17 +632,21 @@ export function LightResults({
                           </span>
                           <span
                             className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
-                              auth.status === "authoritative_match"
+                              auth.status === "authoritative_match" || auth.status === "verified" || auth.status === "corroborated"
                                 ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
                                 : auth.status === "secondary_corroboration"
                                 ? "bg-slate-100 text-slate-700 border border-slate-200"
+                                : auth.status === "contradicted" || auth.status === "authoritative_refutation"
+                                ? "bg-rose-50 text-rose-800 border border-rose-200"
                                 : "bg-amber-50 text-amber-800 border border-amber-200"
                             }`}
                           >
-                            {auth.status === "authoritative_match"
+                            {auth.status === "authoritative_match" || auth.status === "verified" || auth.status === "corroborated"
                               ? "Authoritative"
                               : auth.status === "secondary_corroboration"
                               ? "Secondary"
+                              : auth.status === "contradicted" || auth.status === "authoritative_refutation"
+                              ? "Refuted"
                               : "Unverified"}
                           </span>
                         </div>

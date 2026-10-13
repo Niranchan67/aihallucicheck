@@ -77,7 +77,7 @@ class AuthorityCheck(BaseModel):
     authority_tier: float = 0.85
     authority_label: str = "Reputable Reference"
     dataset: str = "Live Web Index"
-    status: str = "verified"
+    status: str = "authoritative_match"
 
 
 class EvidenceProof(BaseModel):

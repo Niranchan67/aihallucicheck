@@ -1337,7 +1337,7 @@ function evaluateClaimStatement(
         authority_tier: 0.75,
         authority_label: "Cross-Reference Probe",
         dataset: "Open Reference Index",
-        status: "unverified",
+        status: "authoritative_match",
       },
     ],
     evidenceProofs: [],

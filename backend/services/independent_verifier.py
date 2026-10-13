@@ -162,7 +162,10 @@ def generate_independent_query(claim_text: str, analyzed_claim: Optional[Analyze
             contradiction_queries.append(f"capital city of {country_name} official")
 
     # General refutation / debunking probe for extraordinary or physics-defying claims
-    if any(w in clean.lower() for w in ["faster than light", "miracle", "perpetual motion", "telepathy", "alien", "cure for all"]):
+    if any(w in clean.lower() for w in ["faster than light", "faster-than-light", "superluminal", "ftl"]):
+        contradiction_queries.append("no-communication theorem quantum entanglement")
+        contradiction_queries.append("faster-than-light communication quantum entanglement disproven")
+    elif any(w in clean.lower() for w in ["miracle", "perpetual motion", "telepathy", "alien", "cure for all"]):
         contradiction_queries.append(f"{primary_query} debunked myth disproven")
 
     # Broad fallback query (just core entity and core topic)

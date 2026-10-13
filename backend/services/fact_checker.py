@@ -35,6 +35,7 @@ from services.entailment_engine import (
     PropositionVerificationReport,
     SufficiencyState,
     evaluate_complete_claim_propositions,
+    score_evidence_passage,
 )
 from services.independent_verifier import generate_independent_query
 from services.multi_source_retriever import (
@@ -202,7 +203,13 @@ async def verify_single_claim(
     sources_list: List[SourceCitation] = []
     seen_citation_domains = set()
 
-    for ev in materially_relevant_evidence:
+    sorted_citations = sorted(
+        materially_relevant_evidence,
+        key=lambda ev: score_evidence_passage(clean_claim, ev.snippet, ev.title, ev.source_domain, ev.source_name),
+        reverse=True
+    )
+
+    for ev in sorted_citations:
         dom = ev.source_domain or ev.source_url
         if dom not in seen_citation_domains and len(sources_list) < 5:
             seen_citation_domains.add(dom)

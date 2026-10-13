@@ -542,7 +542,7 @@ async def fetch_wikipedia_evidence(query: str, max_results: int = 2) -> List[Ret
                                     source_name="Wikipedia",
                                     source_url=page_url,
                                     title=title,
-                                    snippet=extract[:350],
+                                    snippet=extract[:480],
                                     source_domain="wikipedia.org",
                                     is_secondary=True,  # Explicitly secondary
                                 )
@@ -554,7 +554,7 @@ async def fetch_wikipedia_evidence(query: str, max_results: int = 2) -> List[Ret
                                     source_name="Wikipedia",
                                     source_url=page_url,
                                     title=title,
-                                    snippet=snippet_text[:300],
+                                    snippet=snippet_text[:380],
                                     source_domain="wikipedia.org",
                                     is_secondary=True,
                                 )
