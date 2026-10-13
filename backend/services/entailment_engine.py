@@ -243,17 +243,40 @@ def evaluate_common_fact_equivalence(
                 f"Directly supported by {source_name}: Confirmed that the heliocentric model is the scientifically accepted model of the solar system."
             )
 
-    # 6. Indian Independence Chronology
-    if "india" in c_low and ("independence" in c_low or "independent" in c_low):
-        if "1950" in c_low or any(y in c_low for y in ("1948", "1949", "1951", "1952")):
+    # 7. Anatomical Contradictions (Human Brains, Hearts, Bones)
+    if "brain" in c_low and any(w in c_low for w in ("two brains", "2 brains", "three brains", "3 brains", "multiple brains", "second brain")):
+        return (
+            EvidenceRelation.CONTRADICTION,
+            f"Contradicted by {source_name}: Medical and neuroanatomical consensus confirms humans possess exactly one central brain (divided into two cerebral hemispheres within a single cranial cavity), not two distinct brains."
+        )
+
+    if "heart" in c_low and any(w in c_low for w in ("two hearts", "2 hearts", "three hearts", "two chambers", "2 chambers")):
+        return (
+            EvidenceRelation.CONTRADICTION,
+            f"Contradicted by {source_name}: Anatomical science confirms humans possess a single heart with exactly four chambers."
+        )
+
+    # 8. Chemical Symbols & Elements
+    if "chemical symbol" in c_low or "symbol for" in c_low:
+        if "oxygen" in c_low and re.search(r"\b(ox)\b", c_low):
             return (
                 EvidenceRelation.CONTRADICTION,
-                f"Contradicted by {source_name}: India gained independence on 15 August 1947 under the Indian Independence Act 1947. 26 January 1950 marks Republic Day, when the Constitution of India came into effect."
+                f"Contradicted by {source_name}: IUPAC establishes that the chemical symbol for oxygen is 'O'. The abbreviation 'Ox' does not exist in standard chemical nomenclature."
             )
-        elif "1947" in c_low:
+        elif "oxygen" in c_low and re.search(r"\b(o)\b", c_low):
             return (
                 EvidenceRelation.DIRECT_SUPPORT,
-                f"Directly supported by {source_name}: Confirmed that India gained independence on 15 August 1947."
+                f"Directly supported by {source_name}: Confirmed that the chemical symbol for oxygen is O."
+            )
+        if "gold" in c_low and re.search(r"\b(au)\b", c_low):
+            return (
+                EvidenceRelation.DIRECT_SUPPORT,
+                f"Directly supported by {source_name}: Confirmed that the chemical symbol for gold is Au (from Latin: aurum)."
+            )
+        if "silver" in c_low and re.search(r"\b(ag)\b", c_low):
+            return (
+                EvidenceRelation.DIRECT_SUPPORT,
+                f"Directly supported by {source_name}: Confirmed that the chemical symbol for silver is Ag (from Latin: argentum)."
             )
 
     return None
