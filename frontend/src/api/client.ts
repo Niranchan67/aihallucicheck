@@ -12,7 +12,7 @@ const API_BASE =
     ? import.meta.env.VITE_API_BASE
     : typeof window !== "undefined" && window.location.port === "5173"
     ? "http://localhost:8000"
-    : "";
+    : "https://aihallucicheck.onrender.com";
 
 async function parseErrorBody(res: Response): Promise<string> {
   try {
