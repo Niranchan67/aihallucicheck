@@ -10,7 +10,7 @@ can be tuned or replaced without touching the API layer.
 """
 
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from schemas import ClaimStatus, Distribution
 
@@ -32,7 +32,7 @@ class ScoreSummary:
     hallucinated_count: int
 
 
-def score_claims(statuses: List[ClaimStatus]) -> ScoreSummary:
+def score_claims(statuses: List[ClaimStatus], claim_confidences: Optional[List[float]] = None) -> ScoreSummary:
     if not statuses:
         return ScoreSummary(
             overall_confidence=0.0,
@@ -48,8 +48,11 @@ def score_claims(statuses: List[ClaimStatus]) -> ScoreSummary:
     unverified = sum(1 for s in statuses if s == ClaimStatus.UNVERIFIED)
     hallucinated = sum(1 for s in statuses if s == ClaimStatus.HALLUCINATED)
 
-    weighted_sum = sum(_STATUS_WEIGHT[s] for s in statuses)
-    overall_confidence = round((weighted_sum / total) * 100, 1)
+    if claim_confidences and len(claim_confidences) == total:
+        overall_confidence = round(sum(claim_confidences) / total, 1)
+    else:
+        weighted_sum = sum(_STATUS_WEIGHT[s] for s in statuses)
+        overall_confidence = round((weighted_sum / total) * 100, 1)
 
     # "Suspicious" bucket on the dashboard groups suspicious + unverified,
     # since both mean "needs human review", matching the reference UI's

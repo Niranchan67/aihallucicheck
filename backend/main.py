@@ -126,7 +126,10 @@ async def verify_content(
         citation_results = await validate_citations_pipeline(extracted_citation_strings)
 
     # 4. Stage 5: Confidence Scoring
-    score_summary = score_claims([c.status for c in claim_results])
+    score_summary = score_claims(
+        [c.status for c in claim_results],
+        claim_confidences=[c.confidence for c in claim_results] if claim_results else None,
+    )
 
     verification_id = f"hc-{uuid.uuid4().hex[:8]}"
     created_at = datetime.now(timezone.utc)

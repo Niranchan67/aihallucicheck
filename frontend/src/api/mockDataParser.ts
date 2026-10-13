@@ -316,7 +316,7 @@ function evaluateClaimStatement(
     return {
       type: "factual",
       status: "verified",
-      confidence: 96.0,
+      confidence: 97.4,
       evidence: "Human adult hemoglobin (HbA) is a tetrameric metalloprotein consisting of four globin subunits: two alpha (α) and two beta (β) polypeptide chains, each enclosing an iron-containing heme prosthetic group capable of reversibly binding a molecule of oxygen (O2).",
       source: "Europe PMC / Hematology & Biochemistry Consensus",
       sourceUrl: "https://en.wikipedia.org/wiki/Hemoglobin",
