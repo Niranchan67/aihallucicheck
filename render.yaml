@@ -13,3 +13,7 @@ services:
         value: postgresql+psycopg2://postgres.btjukjpfrxqqqjzwhmwu:%23nirrranchan@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require
       - key: ENVIRONMENT
         value: production
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false

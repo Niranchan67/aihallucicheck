@@ -16,6 +16,7 @@ export interface VerificationRequest {
   verify_claims: boolean;
   verify_citations: boolean;
   verify_statistics: boolean;
+  api_key?: string;
 }
 
 export interface SourceCitation {

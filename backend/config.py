@@ -62,6 +62,8 @@ class Settings(BaseModel):
     # --- LLM providers (used for claim classification / judgement) ---
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY") or None
     anthropic_api_key: Optional[str] = os.getenv("ANTHROPIC_API_KEY") or None
+    gemini_api_key: Optional[str] = os.getenv("GEMINI_API_KEY") or None
+    groq_api_key: Optional[str] = os.getenv("GROQ_API_KEY") or None
 
     # --- Live web / academic search providers (used for evidence retrieval) ---
     tavily_api_key: Optional[str] = os.getenv("TAVILY_API_KEY") or None

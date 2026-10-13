@@ -44,6 +44,9 @@ class VerificationRequest(BaseModel):
     verify_statistics: bool = Field(
         default=False, description="Apply stricter scrutiny to numeric/statistical claims."
     )
+    api_key: Optional[str] = Field(
+        default=None, description="Optional user-provided LLM API key (Gemini, Groq, or OpenAI)."
+    )
 
     @field_validator("text")
     @classmethod

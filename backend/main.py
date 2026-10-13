@@ -118,7 +118,7 @@ async def verify_content(
             (c.id, c.text, c.type, c.start_index, c.end_index)
             for c in extracted_claims
         ]
-        claim_results = await verify_claims_pipeline(batch_input)
+        claim_results = await verify_claims_pipeline(batch_input, user_api_key=payload.api_key)
 
     # 3. Stage 4: Citation & Reference Validation
     citation_results = []

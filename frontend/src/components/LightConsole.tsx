@@ -48,6 +48,24 @@ export function LightConsole({
   const [sourceDepth, setSourceDepth] = useState<"standard" | "deep">("standard");
   const [verifyCitations, setVerifyCitations] = useState(true);
   const [showOptions, setShowOptions] = useState(false);
+  const [apiKey, setApiKey] = useState(() => {
+    try {
+      return localStorage.getItem("hallucicheck_api_key") || "";
+    } catch {
+      return "";
+    }
+  });
+
+  const handleApiKeyChange = (val: string) => {
+    setApiKey(val);
+    try {
+      if (val.trim()) {
+        localStorage.setItem("hallucicheck_api_key", val.trim());
+      } else {
+        localStorage.removeItem("hallucicheck_api_key");
+      }
+    } catch {}
+  };
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -59,6 +77,7 @@ export function LightConsole({
       verify_claims: true,
       verify_citations: verifyCitations,
       verify_statistics: true,
+      api_key: apiKey.trim() || undefined,
     });
   };
 
@@ -257,6 +276,31 @@ export function LightConsole({
                   </span>
                 </div>
               </label>
+            </div>
+
+            {/* Custom LLM Reasoning Key Input */}
+            <div className="p-3 rounded-lg border border-slate-200 bg-white space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-900 flex items-center gap-1.5">
+                  <Sparkles size={13} className="text-indigo-600" />
+                  <span>LLM Entailment Engine (Gemini / Groq / OpenAI)</span>
+                </span>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${
+                  apiKey ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-500"
+                }`}>
+                  {apiKey ? "Active Custom LLM Key" : "Free Cloud Engine / Consensus"}
+                </span>
+              </div>
+              <input
+                type="password"
+                placeholder="Optional: Paste Gemini (AIzaSy...), Groq (gsk_...), or OpenAI (sk-...) API key for LLM reasoning"
+                value={apiKey}
+                onChange={(e) => handleApiKeyChange(e.target.value)}
+                className="w-full text-xs font-mono px-3 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-slate-900 bg-slate-50/50"
+              />
+              <p className="text-[11px] text-slate-500 leading-snug">
+                Connects live retrieved multi-source evidence to frontier LLM reasoning. Saved locally in your browser.
+              </p>
             </div>
           </div>
         )}

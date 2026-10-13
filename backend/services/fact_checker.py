@@ -64,12 +64,15 @@ def map_internal_to_claim_type(internal_type: InternalClaimType) -> ClaimType:
         return ClaimType.FACTUAL
 
 
+from services.llm_verifier import verify_claim_with_llm
+
 async def verify_single_claim(
     claim_id: str,
     claim_text: str,
     claim_type: ClaimType,
     start_index: int = 0,
     end_index: int = 0,
+    user_api_key: Optional[str] = None,
 ) -> ClaimResult:
     """
     Executes the full LLM-style evidence verification pipeline on a single claim.
@@ -107,7 +110,6 @@ async def verify_single_claim(
     query_set = generate_independent_query(clean_claim, analyzed_claim=analyzed)
 
     # 3. Stage 5: Concurrent Multi-Source Evidence Retrieval
-    # Queries OpenAlex, CrossRef, PubMed, ArXiv, DuckDuckGo Live Web, Wikidata, and Wikipedia
     raw_evidence: List[RetrievedEvidence] = await retrieve_multi_source_evidence(
         query=query_set.primary_query,
         subclaim_queries=query_set.subclaim_queries,
@@ -116,7 +118,6 @@ async def verify_single_claim(
     )
 
     # 4. Stage 6: URL Validation & Canonicalization (Strict Reachability & Integrity)
-    # Rejects malformed or unreachable URLs; follows redirects to canonical landing pages
     validated_evidence: List[RetrievedEvidence] = []
     seen_urls: Set[str] = set()
 
@@ -142,27 +143,22 @@ async def verify_single_claim(
             )
 
     # 5. Stage 7: Source Quality & Relevance Filtering
-    # CRITICAL RULE: High authority source that is irrelevant to the claim is NOT evidence.
     all_claim_terms = set()
     for prop in analyzed.atomic_propositions:
         all_claim_terms.update(prop.content_terms)
 
     materially_relevant_evidence: List[RetrievedEvidence] = []
     for ev in validated_evidence:
-        # Check relevance to claim
         is_relevant, rel_score = evaluate_source_relevance(
             claim_terms=all_claim_terms,
             entities=analyzed.entities,
             snippet=ev.snippet,
             title=ev.title,
         )
-
-        # Allow Wikidata or contradiction probes if they mention subject
         if is_relevant or ev.is_contradiction_probe or "wikidata" in ev.source_domain:
             materially_relevant_evidence.append(ev)
 
     # 6. Stage 8: Adaptive Retrieval Retry
-    # If no materially relevant evidence was found, retry with broad fallback query
     if not materially_relevant_evidence and query_set.broad_fallback_query:
         fallback_raw = await retrieve_multi_source_evidence(
             query=query_set.broad_fallback_query,
@@ -185,21 +181,35 @@ async def verify_single_claim(
                         )
                     )
 
-    # 7. Stage 9 & 10: Proposition-Level Evidence Entailment & Sufficiency Analysis
-    prop_report: PropositionVerificationReport = evaluate_complete_claim_propositions(
+    # 7. Stage 9 & 10: Factual Entailment (LLM-Powered with Deterministic Fallback)
+    llm_result = await verify_claim_with_llm(
+        claim_text=clean_claim,
+        evidence_pool=materially_relevant_evidence,
+        user_api_key=user_api_key,
+    )
+
+    prop_report = evaluate_complete_claim_propositions(
         claim_text=clean_claim,
         evidence_pool=materially_relevant_evidence,
         analyzed_claim=analyzed,
     )
 
-    final_status = prop_report.final_status
-    final_conf = prop_report.confidence
-    final_reasoning = prop_report.rationale
-    final_evidence = prop_report.primary_evidence_quote
-    primary_source = prop_report.primary_source_name or "Authoritative Consensus"
-    primary_url = prop_report.primary_source_url
+    if llm_result:
+        final_status = llm_result.status
+        final_conf = llm_result.confidence
+        final_reasoning = llm_result.reasoning
+        final_evidence = llm_result.primary_quote or prop_report.primary_evidence_quote
+        primary_source = llm_result.primary_source_name or prop_report.primary_source_name or "Authoritative Consensus"
+        primary_url = llm_result.primary_source_url or prop_report.primary_source_url
+    else:
+        final_status = prop_report.final_status
+        final_conf = prop_report.confidence
+        final_reasoning = prop_report.rationale
+        final_evidence = prop_report.primary_evidence_quote
+        primary_source = prop_report.primary_source_name or "Authoritative Consensus"
+        primary_url = prop_report.primary_source_url
 
-    # 8. Stage 11: Construct Clean Citation List (Reachable, Distinct Domains Only)
+    # 8. Stage 11: Construct Clean Citation List
     sources_list: List[SourceCitation] = []
     seen_citation_domains = set()
 
@@ -235,7 +245,7 @@ async def verify_single_claim(
     )
 
 
-async def verify_claims_pipeline(claims: List[Tuple]) -> List[ClaimResult]:
+async def verify_claims_pipeline(claims: List[Tuple], user_api_key: Optional[str] = None) -> List[ClaimResult]:
     """Concurrently verifies a batch of claims across the complete factual pipeline."""
     tasks = []
     for item in claims:
@@ -244,5 +254,5 @@ async def verify_claims_pipeline(claims: List[Tuple]) -> List[ClaimResult]:
         else:
             cid, ctext, ctype = item[:3]
             s_idx, e_idx = 0, len(ctext)
-        tasks.append(verify_single_claim(cid, ctext, ctype, s_idx, e_idx))
+        tasks.append(verify_single_claim(cid, ctext, ctype, s_idx, e_idx, user_api_key=user_api_key))
     return await asyncio.gather(*tasks)

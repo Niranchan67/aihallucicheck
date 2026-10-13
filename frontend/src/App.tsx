@@ -125,7 +125,18 @@ export default function App() {
 
     try {
       // Primary dispatch to FastAPI backend (queries OpenAlex, PubMed, ArXiv, DuckDuckGo, Wikipedia)
-      const data = await verifyContent(payload);
+      const storedApiKey = (() => {
+        try {
+          return localStorage.getItem("hallucicheck_api_key") || undefined;
+        } catch {
+          return undefined;
+        }
+      })();
+      const finalPayload: VerificationRequest = {
+        ...payload,
+        api_key: payload.api_key || storedApiKey,
+      };
+      const data = await verifyContent(finalPayload);
       setActiveResult(data);
       setIsProcessing(false);
 
