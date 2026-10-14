@@ -846,25 +846,12 @@ def synthesize_deep_factual_reasoning(
     authority_checks: List[AuthorityCheck],
 ) -> Tuple[str, Optional[str]]:
     """
-    Synthesizes deep, rigorous, multi-sentence factual reasoning with:
-    1. Proposition-level breakdown (primary assertion + qualifiers).
-    2. Explicit dataset & registry matching (CrossRef, OpenAlex, PubMed, Wikidata, etc.).
-    3. Authority registry checks (domain authority rating & verification tiers).
-    4. Exact ground-truth quotation & contradiction comparisons.
-    5. Final verdict calibration and analyst advisory.
+    Synthesizes clean, direct, factual reasoning focused strictly on factual content and evidence.
     """
-    dataset_summary = ", ".join(sorted(datasets_matched)) if datasets_matched else "independent scholarly and open-web registries"
-    domain_count = max(len(distinct_domains), 1)
-
-    primary_auth = next((a for a in authority_checks if a.source_name == primary_s_name or a.domain in (primary_s_url or "")), None)
-    auth_label = primary_auth.authority_label if primary_auth else "Peer-Reviewed / Authoritative Reference"
-    auth_tier = f"{primary_auth.authority_tier:.2f}" if primary_auth else "0.90"
-
     # 1. HALLUCINATED
     if has_contradiction and contra_eval:
         contra_src = contra_eval.contradicting_source_names[0] if contra_eval.contradicting_source_names else (primary_s_name or "Official Registry")
-        contra_url = contra_eval.contradicting_urls[0] if contra_eval.contradicting_urls else (primary_s_url or "")
-        contra_quote = contra_eval.contradicting_quotes[0] if contra_eval.contradicting_quotes else (primary_quote or "Contrary factual record")
+        contra_quote = contra_eval.contradicting_quotes[0] if contra_eval.contradicting_quotes else (primary_quote or "")
         contra_rationale = contra_eval.rationale or "The asserted relationship directly conflicts with recorded facts."
 
         contradiction_details = (
@@ -873,95 +860,48 @@ def synthesize_deep_factual_reasoning(
             f"Factual discrepancy: {contra_rationale}"
         )
 
-        p1 = (
-            f"This assertion is classified as HALLUCINATED with a low factual certainty score of {confidence:.1f}%, "
-            f"governed by an empirical contradiction discovered during multi-source registry cross-examination. "
-            f"While the input statement claims that '{claim_text}', verified records from authoritative repositories directly refute this assertion."
-        )
-        p2 = (
-            f"Multi-source retrieval cross-referenced ground truth across {dataset_summary}. "
-            f"Specifically, verified records from {contra_src} document: \"{contra_quote[:240]}\". "
-            f"{contra_rationale}"
-        )
-        p3 = (
-            f"Authority registry checks validate that {contra_src} operates under a recognized knowledge standard "
-            f"(Authority Rating: {auth_tier} - {auth_label}), which supersedes unverified AI outputs. "
-            f"Because official records directly disprove the asserted proposition, this statement is rejected as factually inaccurate or fabricated."
-        )
-        reasoning = f"{p1}\n\n{p2}\n\n{p3}"
+        quote_part = f' Documentation from {contra_src} confirms: "{contra_quote.strip()}".' if contra_quote else ""
+        reasoning = f"{contra_rationale.strip()}{quote_part}"
         return reasoning, contradiction_details
 
     # 2. VERIFIED
     elif final_status == ClaimStatus.VERIFIED:
-        primary_stmt = primary_eval.proposition.statement if primary_eval else "the core relational assertion"
-        qualifiers = [e.proposition.statement for e in evaluations if e.proposition.prop_type != "primary"]
-
+        primary_stmt = primary_eval.proposition.statement if primary_eval else claim_text.strip()
         core_explanation = ""
         if primary_eval and primary_eval.rationale:
-            clean_rat = re.sub(r"^(?:Directly supported by [^:]+:\s*|Confirmed that\s*)", "", primary_eval.rationale).strip()
+            clean_rat = primary_eval.rationale.strip()
+            for pat in [
+                r"^Directly (?:supported|substantiated|corroborated) by [^:]+:\s*",
+                r"^Authoritative (?:ground truth|records) confirms? that\s*",
+                r"^Historical records confirms? that\s*",
+                r"^Confirmed that\s*",
+            ]:
+                clean_rat = re.sub(pat, "", clean_rat, flags=re.I).strip()
             if clean_rat and not clean_rat.startswith("Proposition") and len(clean_rat) > 10:
-                core_explanation = f" Authoritative ground truth confirms: {clean_rat}."
+                core_explanation = clean_rat
 
-        p1 = (
-            f"This statement is confirmed as VERIFIED ({confidence:.1f}% Certainty) based on rigorous proposition-level "
-            f"concordance across authoritative reference repositories.{core_explanation} Every constituent fact within the assertion—including "
-            f"the primary relation ('{primary_stmt}')"
-            + (f" as well as contextual qualifiers ({'; '.join(qualifiers)})" if qualifiers else "")
-            + "—is directly corroborated by established empirical data."
-        )
-        quote_part = f' Specifically, official documentation from {primary_s_name} records: "{primary_quote[:220]}".' if primary_quote else ""
-        p2 = (
-            f"Multi-source cross-examination established positive concordance across {dataset_summary}.{quote_part} "
-            f"The corroborating sources register high authority ratings (Registry Weight: {auth_tier} - {auth_label}) "
-            f"with zero contradictory records across {domain_count} independent root domain(s)."
-        )
-        p3 = (
-            f"Deterministic consensus aggregation confirms that all physical constants, temporal dates, and entity relationships align with "
-            f"empirical knowledge bases. The assertion satisfies rigorous factual certainty standards without discrepancies."
-        )
-        reasoning = f"{p1}\n\n{p2}\n\n{p3}"
+        quote_part = f' Official documentation from {primary_s_name} records: "{primary_quote.strip()}".' if primary_quote else ""
+        if core_explanation:
+            reasoning = f"Authoritative records confirm that {core_explanation.rstrip('.')}.{quote_part}"
+        else:
+            reasoning = f"Authoritative reference records corroborate that {claim_text.strip().rstrip('.')}.{quote_part}"
         return reasoning, None
 
     # 3. SUSPICIOUS (Partial Support)
     elif primary_eval and primary_eval.relation == EvidenceRelation.DIRECT_SUPPORT and unsupported_qualifiers:
         primary_stmt = primary_eval.proposition.statement
         missing_phrases = [f"'{e.proposition.raw_phrase}' ({e.proposition.prop_type})" for e in unsupported_qualifiers]
+        quote_part = f' Documentation from {primary_s_name} records: "{primary_quote.strip()}".' if primary_quote else ""
 
-        p1 = (
-            f"This claim is classified as SUSPICIOUS ({confidence:.1f}% Certainty) due to partial factual verification "
-            f"accompanied by unsubstantiated secondary qualifiers. While authoritative records substantiate the primary event "
-            f"('{primary_stmt}'), they fail to corroborate the asserted qualifier(s): {', '.join(missing_phrases)}."
+        reasoning = (
+            f"Authoritative records confirm the primary event ('{primary_stmt}'), but lack corroboration for the asserted qualifier(s): {', '.join(missing_phrases)}.{quote_part}"
         )
-        quote_part = f' Specifically, documentation from {primary_s_name} confirms: "{primary_quote[:220]}".' if primary_quote else ""
-        p2 = (
-            f"Cross-referencing against {dataset_summary} validates that the overarching historical or empirical event occurred.{quote_part} "
-            f"However, exhaustive automated queries across scholarly DOIs, official archives, and knowledge graphs found no verified "
-            f"documentation establishing that the event occurred for the asserted reason or within the specified parameters."
-        )
-        p3 = (
-            f"Under strict multi-component entailment rules, verifying an event does NOT verify an unproven causal qualifier or attribution. "
-            f"Because this assertion conflates a true event with an uncorroborated qualification, it is flagged as SUSPICIOUS and requires human review."
-        )
-        reasoning = f"{p1}\n\n{p2}\n\n{p3}"
         return reasoning, None
 
     # 4. SUSPICIOUS (Insufficient Evidence)
     else:
-        p1 = (
-            f"This statement cannot be substantiated ({confidence:.1f}% Certainty) due to insufficient supporting evidence "
-            f"across authoritative scholarly and reference knowledge bases. Independent search queries across {dataset_summary} "
-            f"yielded no reliable passages substantiating the asserted relationship."
-        )
-        quote_part = f' Excerpts from related records state: "{primary_quote[:200]}", but lack relational entailment.' if primary_quote else ""
-        p2 = (
-            f"Automated sweeps across CrossRef DOI indexes, OpenAlex academic literature, Wikidata triples, and live web archives "
-            f"found mentions of the constituent entities, but no peer-reviewed or institutional record corroborating the asserted proposition.{quote_part}"
-        )
-        p3 = (
-            f"Because this assertion lacks empirical documentation in credible registries (Authority Rating: {auth_tier} - {auth_label}), "
-            f"it is flagged as SUSPICIOUS and requires independent verification prior to citation or deployment."
-        )
-        reasoning = f"{p1}\n\n{p2}\n\n{p3}"
+        quote_part = f' Related records from {primary_s_name} state: "{primary_quote.strip()}".' if primary_quote else ""
+        reasoning = f"Authoritative reference records lack sufficient evidence to substantiate '{claim_text.strip()}'.{quote_part}"
         return reasoning, None
 
 
